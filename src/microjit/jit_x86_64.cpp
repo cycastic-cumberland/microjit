@@ -21,7 +21,7 @@ static constexpr auto esi = asmjit::x86::esi;
 
 static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
-#define VERBOSE_ASSEMBLER_LOG
+//#define VERBOSE_ASSEMBLER_LOG
 
 #if defined(DEBUG_ENABLED) && defined(VERBOSE_ASSEMBLER_LOG)
 #include <iostream>
@@ -38,6 +38,33 @@ static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
     AIN(assembler->mov(rbx, LOAD_VRSP));                \
     AIN(assembler->sub(rbx, (m_amount)));               \
     AIN(assembler->mov(STORE_VRSP, rbx))
+
+#define VAR_COPY(m_var)                                                                             \
+    if (!m_var->type.is_fundamental){                                                               \
+        AIN(assembler->mov(asmjit::x86::rdi, rbx));                                                 \
+        AIN(assembler->mov(asmjit::x86::rsi, rcx));                                                 \
+        AIN(assembler->call(m_var->type.copy_constructor));                                         \
+    } else {                                                                                        \
+        switch (m_var->type.size) {                                                                 \
+            case 1:                                                                                 \
+                AIN(assembler->mov(asmjit::x86::dl, asmjit::x86::byte_ptr(asmjit::x86::rcx)));      \
+                AIN(assembler->mov(asmjit::x86::byte_ptr(rbx), asmjit::x86::dl));                   \
+                break;                                                                              \
+            case 2:                                                                                 \
+                AIN(assembler->mov(asmjit::x86::dx, asmjit::x86::word_ptr(asmjit::x86::rcx)));      \
+                AIN(assembler->mov(asmjit::x86::word_ptr(rbx), asmjit::x86::dx));                   \
+                break;                                                                              \
+            case 4:                                                                                 \
+                AIN(assembler->mov(asmjit::x86::edx, asmjit::x86::dword_ptr(asmjit::x86::rcx)));    \
+                AIN(assembler->mov(asmjit::x86::dword_ptr(rbx), asmjit::x86::edx));                 \
+                break;                                                                              \
+            case 8:                                                                                 \
+                AIN(assembler->mov(asmjit::x86::rdx, asmjit::x86::qword_ptr(asmjit::x86::rcx)));    \
+                AIN(assembler->mov(asmjit::x86::qword_ptr(rbx), asmjit::x86::rdx));                 \
+                break;                                                                              \
+        }                                                                                           \
+    }
+
 
 microjit::MicroJITCompiler::CompilationResult
 microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
@@ -116,62 +143,45 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                 AIN(assembler->mov(rcx, LOAD_VRBP));
                 AIN(assembler->mov(rbx, rcx));
                 AIN(assembler->sub(rcx, std::abs(vstack_offset)));
-                // rbx store the return address, rcx store the variable address
-                switch (return_variable->type.size) {
-                    case 1:
-                        AIN(assembler->mov(asmjit::x86::dl, asmjit::x86::byte_ptr(asmjit::x86::rcx)));
-                        AIN(assembler->mov(asmjit::x86::byte_ptr(rbx), asmjit::x86::dl));
-                        break;
-                    case 2:
-                        AIN(assembler->mov(asmjit::x86::dx, asmjit::x86::word_ptr(asmjit::x86::rcx)));
-                        AIN(assembler->mov(asmjit::x86::word_ptr(rbx), asmjit::x86::dx));
-                        break;
-                    case 4:
-                        AIN(assembler->mov(asmjit::x86::edx, asmjit::x86::dword_ptr(asmjit::x86::rcx)));
-                        AIN(assembler->mov(asmjit::x86::dword_ptr(rbx), asmjit::x86::edx));
-                        break;
-                    case 8:
-                        AIN(assembler->mov(asmjit::x86::rdx, asmjit::x86::qword_ptr(asmjit::x86::rcx)));
-                        AIN(assembler->mov(asmjit::x86::qword_ptr(rbx), asmjit::x86::rdx));
-                        break;
-                    default: {
-                        // Move rbx into rdi
-                        AIN(assembler->mov(asmjit::x86::rdi, rbx));
-                        // Move rcx into rsi
-                        AIN(assembler->mov(asmjit::x86::rsi, rcx));
-                        // Call copy constructor
-                        AIN(assembler->call(return_variable->type.copy_constructor));
-                        break;
-                    }
-                }
+
+                VAR_COPY(return_variable);
+
                 call_destructors(assembler, variables_vstack_offset_map, p_func->main_scope);
                 break;
             }
-            case Instruction::IT_CONSTRUCT_IMM: {
-                auto as_imm_assign = current_instruction.c_style_cast<CopyConstructImmInstruction>();
-                auto vstack_offset = variables_vstack_offset_map.at((size_t)as_imm_assign->assign_target.ptr());
-                AIN(assembler->mov(rbx, LOAD_VRBP));
-                AIN(assembler->sub(rbx, std::abs(vstack_offset)));
-                switch (as_imm_assign->assign_target->type.size) {
-                    case 1:
-                        AIN(assembler->mov(asmjit::x86::byte_ptr(rbx), *(uint8_t*)(as_imm_assign->data)));
+            case Instruction::IT_CONSTRUCT:{
+                auto as_ctor = current_instruction.c_style_cast<ConstructInstruction>();
+                auto vstack_offset = variables_vstack_offset_map.at((size_t)as_ctor->target_variable.ptr());
+                AIN(assembler->mov(rdi, LOAD_VRBP));
+                AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                AIN(assembler->call(as_ctor->ctor));
+                break;
+            }
+            case Instruction::IT_COPY_CONSTRUCT:{
+                auto as_cc = current_instruction.c_style_cast<CopyConstructInstruction>();
+                switch (as_cc->value_reference->get_value_type()) {
+                    case Value::VAL_IMMEDIATE: {
+                        auto vstack_offset = variables_vstack_offset_map.at((size_t)as_cc->target_variable.ptr());
+                        AIN(assembler->mov(rdi, LOAD_VRBP));
+                        AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                        if (as_cc->target_variable->type.is_fundamental)
+                            copy_immediate_primitive(assembler, as_cc);
+                        else copy_immediate(assembler, as_cc);
                         break;
-                    case 2:
-                        AIN(assembler->mov(asmjit::x86::word_ptr(rbx), *(uint16_t*)(as_imm_assign->data)));
-                        break;
-                    case 4:
-                        AIN(assembler->mov(asmjit::x86::dword_ptr(rbx), *(uint32_t*)(as_imm_assign->data)));
-                        break;
-                    case 8:
-                        // Somehow 64-bit values require a bit more attention...
-                        AIN(assembler->mov(rdx, *(uint64_t*)(as_imm_assign->data)));
-                        AIN(assembler->mov(asmjit::x86::qword_ptr(rbx), rdx));
-                        break;
-                    default: {
-                        move_immediate(assembler, as_imm_assign);
+                    }
+                    case Value::VAL_ARGUMENT: {
+                        auto as_arg = as_cc->value_reference.c_style_cast<ArgumentValue>();
+                        auto arg_offset = p_func->arguments->argument_offsets()[as_arg->argument_index];
+                        arg_offset += p_func->return_type.size;
+                        auto vstack_offset = variables_vstack_offset_map.at((size_t)as_cc->target_variable.ptr());
+                        copy_argument(assembler, as_cc, vstack_offset, arg_offset);
                         break;
                     }
                 }
+                break;
+            }
+            case Instruction::IT_ASSIGN:{
+                auto as_assign = current_instruction.c_style_cast<AssignInstruction>();
                 break;
             }
             case Instruction::IT_NONE:
@@ -187,27 +197,87 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     return { 0, assembly };
 }
 
-void microjit::MicroJITCompiler_x86_64::move_immediate(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                                       const microjit::Ref<microjit::CopyConstructImmInstruction> &p_imm) {
-    const auto& type_data = p_imm->type;
+void microjit::MicroJITCompiler_x86_64::copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                                 const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction) {
+    const auto& type_data = p_instruction->target_variable->type;
+    auto imm = p_instruction->value_reference.c_style_cast<ImmediateValue>();
+    auto as_byte_array = imm->data;
+    switch (type_data.size) {
+        case 1:
+            AIN(assembler->mov(asmjit::x86::cl, *(const uint8_t*)as_byte_array));
+            AIN(assembler->mov(asmjit::x86::byte_ptr(rdi), asmjit::x86::cl));
+            break;
+        case 2:
+            AIN(assembler->mov(asmjit::x86::cx, *(const uint16_t*)as_byte_array));
+            AIN(assembler->mov(asmjit::x86::word_ptr(rdi), asmjit::x86::cx));
+            break;
+        case 4:
+            AIN(assembler->mov(asmjit::x86::ecx, *(const uint32_t*)as_byte_array));
+            AIN(assembler->mov(asmjit::x86::dword_ptr(rdi), asmjit::x86::ecx));
+            break;
+        case 8:
+            AIN(assembler->mov(asmjit::x86::rcx, *(const uint64_t*)as_byte_array));
+            AIN(assembler->mov(asmjit::x86::qword_ptr(rdi), asmjit::x86::rcx));
+            break;
+    }
+}
+
+void microjit::MicroJITCompiler_x86_64::copy_immediate(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                       const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction) {
+    const auto& type_data = p_instruction->target_variable->type;
+    auto imm = p_instruction->value_reference.c_style_cast<ImmediateValue>();
     // The value to be copied, as byte array
-    auto as_byte_array = p_imm->data;
-    // Move copy destination (which is rbx) into rdi
-    AIN(assembler->mov(rdi, rbx));
+    auto as_byte_array = imm->data;
+    // Copy destination is currently in rdi
     // Allocate immediate value space on real stack
     // Copy the value onto real stack, byte by byte
     AIN(assembler->sub(rsp, type_data.size));
     // Copying by receding chunks did not work, not sure why
-    // Copying byte-by-byte would have to do it for now
-    for (auto seek = decltype(type_data.size)(); seek < type_data.size; seek++) {
-        AIN(assembler->mov(asmjit::x86::byte_ptr(rsp, seek), ((const uint8_t*)as_byte_array)[seek]));
+    // Copying bytes-by-bytes would have to do it for now
+    switch (type_data.size) {
+        case 1:{
+            AIN(assembler->mov(asmjit::x86::byte_ptr(rsp), *(const uint8_t*)as_byte_array));
+            break;
+        }
+        case 2:{
+            AIN(assembler->mov(asmjit::x86::word_ptr(rsp), *(const uint16_t*)as_byte_array));
+            break;
+        }
+        case 4:{
+            AIN(assembler->mov(asmjit::x86::dword_ptr(rsp), *(const uint32_t*)as_byte_array));
+            break;
+        }
+        case 8:{
+            AIN(assembler->mov(rcx, *(const uint64_t*)as_byte_array));
+            AIN(assembler->mov(asmjit::x86::qword_ptr(rsp), rcx));
+            break;
+        }
+        default:{
+            for (auto seek = decltype(type_data.size)(); seek < type_data.size; seek++) {
+                AIN(assembler->mov(asmjit::x86::byte_ptr(rsp, seek), ((const uint8_t*)as_byte_array)[seek]));
+            }
+        }
     }
     // Move copy target (which is going to be real rsp) to rsi
     AIN(assembler->mov(rsi, rsp));
     // Call copy constructor
-    AIN(assembler->call(type_data.copy_constructor));
+    AIN(assembler->call(p_instruction->ctor));
     // Return the stack space
     AIN(assembler->add(rsp, type_data.size));
+}
+
+void microjit::MicroJITCompiler_x86_64::copy_argument(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                      const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction,
+                                                      const int64_t& p_offset,
+                                                      const uint32_t& p_arg_offset) {
+    const auto& type_data = p_instruction->target_variable->type;
+    auto arg = p_instruction->value_reference.c_style_cast<ArgumentValue>();
+    AIN(assembler->mov(rbx, LOAD_VRBP));
+    AIN(assembler->mov(rcx, rbx));
+    AIN(assembler->sub(rbx, std::abs(p_offset)));
+    // argument_offset = return_size + relative_offset
+    AIN(assembler->add(rcx, p_arg_offset));
+    VAR_COPY(p_instruction->target_variable);
 }
 
 void microjit::MicroJITCompiler_x86_64::call_destructors(microjit::Box<asmjit::x86::Assembler> &assembler,
@@ -215,13 +285,14 @@ void microjit::MicroJITCompiler_x86_64::call_destructors(microjit::Box<asmjit::x
                                                          const microjit::Ref<microjit::RectifiedScope> &p_scope) {
     for (const auto& var : p_scope->get_variables()){
         auto vstack_offset = p_offset_map.at((size_t)var.ptr());
-        AIN(assembler->mov(rbx, LOAD_VRBP));
-        AIN(assembler->sub(rbx, std::abs(vstack_offset)));
-        AIN(assembler->mov(rdi, rbx));
+        if (var->type.is_fundamental) continue;
+        AIN(assembler->mov(rdi, LOAD_VRBP));
+        AIN(assembler->sub(rdi, std::abs(vstack_offset)));
         AIN(assembler->call(var->type.destructor));
     }
 }
 
+#undef VAR_COPY
 #undef STORE_VRBP
 #undef STORE_VRSP
 #undef LOAD_VRBP

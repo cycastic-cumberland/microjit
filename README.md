@@ -1,0 +1,140 @@
+# MicroJIT
+
+
+MicroJIT is a lightweight Just-In-Time compiler designed in C++, for C++.
+
+**This project is in the early stage of its lifetime so most feature currently does not work, correctly or at all**
+
+## Requirement
+
+MicroJIT makes extensive use of variadic template, which require C++ 17 or above. It has been tested with GCC 13.2.1
+
+## Getting Started
+
+To use MicroJIT, start by cloning this repo to your CMake project:
+
+```shell
+git clone --recurse-submodules github.com/cycastic-cumberland/microjit
+```
+
+Add these lines to your CMakeLists.txt:
+
+```cmake
+set(MICROJIT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/microjit)
+set(ASMJIT_SOURCE_DIR ${MICROJIT_SOURCE_DIR}/asmjit)
+
+add_subdirectory(${MICROJIT_SOURCE_DIR})
+add_subdirectory(${ASMJIT_SOURCE_DIR})
+
+include_directories(${ASMJIT_SOURCE_DIR}/src)
+include_directories(${MICROJIT_SOURCE_DIR}/src)
+
+target_link_libraries(your_project_name asmjit microjit)
+```
+
+## Usage
+
+Start by including `microjit/orchestrator.h`
+
+The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and cache `Instance` objects. By default, it is atomically reference-counted, which allows it to be used concurrently and can be cleaned-up automatically, as long as there's no nested reference.
+
+All othe major components of MicroJIT are also reference counted (albeit not atomically), so no further memory management is needed.
+
+An `Instance` is an utility class which manage and compile your functions. `Instance` support lazy compilation, the first time it is invoked, it will forward the compilation request to the Orchestrator, which will in turn return the compiled callback, provided by AsmJit. Any subsequence invocation will use the compiled callback.
+
+The Orchestrator actually return an `InstanceWrapper` instead of the `Instance` itself, but you could use it by dereferencing the `InstanceWrapper`.
+
+```c++
+auto re1 = instance(12);  // This will compile the function and call it
+auto re2 = instance(122); // This will call the compiled code immediately
+```
+
+To edit you function, first call `get_function()` from the `Instance` object.
+
+```c++
+auto function = instance->get_function();
+```
+
+The return value is of type `Ref<Function<R, Args...>>`. This generic object store the argument list and (generic) main scope. All function generic scopes are just wrapper for `RectifiedScope`, which does not use template (at least at class level), allowing IntelliSense to work without all template arguments filled. Despite this, type checking still work thanks to the serialized type data provided by `Type`.
+
+```c++
+template<typename T>
+static Type get_type_info(){
+    return Type::create<T>();
+}
+```
+
+All instructions are issued through `Scope<R, Args...>`. In near future, nested scopes will be supported, but for now you can only play with the main scope.
+
+## Feature checklist
+
+### Basic features
+
+- [x] x86_64 support
+- [x] Generic functions
+- [x] Variables
+- [x] Literals
+- [x] Arguments
+- [x] Return value
+- [x] Orchestrator's basic functionalities
+- [x] Compilation cache
+- [x] Virtual stack extraction
+- [ ] Multiple scopes
+- [ ] Branches (if/else/for/while)
+- [ ] Native function call
+- [ ] JIT compiled function call
+- [ ] Lazy compilation
+- [ ] LRU
+- [ ] Documentation
+
+### Advanced features
+
+- [ ] Asynchronous compilation
+- [ ] x86 support
+- TBA...
+
+## Targets
+
+|        | gcc (Linux) | clang (Linux) | MSVC (Windows) | MinGW (Windows) |
+|--------|-------------|---------------|----------------|-----------------|
+| x86    | [ ]         | [ ]           | [ ]            | [ ]             |
+| x86_64 | [x]         | [ ]           | [ ]            | [ ]             |
+
+
+## License
+
+See LICENSE.txt
+
+## Acknowledgements
+
+This project use the AsmJit library (See [LICENSE](https://github.com/asmjit/asmjit/blob/master/LICENSE.md))
+
+## Example
+
+```c++
+#include <microjit/orchestrator.h>
+#include <iostream>
+
+int main(){
+    auto orchestrator = microjit::orchestrator();
+    auto instance = orchestrator->create_instance<int, int>();
+    // Use this if you have a function as mold
+    // std::function<int(int)> mold;
+    // auto instance = orchestrator->create_instance_from_model(mold);
+    auto main_scope = instance->get_function()->get_main_scope();
+    // Create stack space for a var1
+    auto var1 = main_scope->create_variable<int>();
+    // Assign var1 as the value of the first argument
+    main_scope->construct_from_argument(var1, 0);
+    // Return var1
+    main_scope->function_return(var1);
+    // Compile and run the function
+    auto re = instance(12);
+    if (re == 12)
+        std::cout << "It worked!\n";
+    // instance is now compiled and any subsequence invocation will use the compiled function
+    // To recompile:
+    // instance->recompile();
+    return 0;
+}
+```

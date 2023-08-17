@@ -15,7 +15,14 @@
 namespace microjit {
     class MicroJITCompiler_x86_64 : public MicroJITCompiler {
     private:
-        static void move_immediate(Box<asmjit::x86::Assembler>& assembler, const Ref<CopyConstructImmInstruction>& p_imm);
+        static void copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                             const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction);
+        static void copy_immediate(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                   const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction);
+        static void copy_argument(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                  const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction,
+                                  const int64_t& p_offset,
+                                  const uint32_t& p_arg_offset);
         static void call_destructors(Box<asmjit::x86::Assembler>& assembler,
                                      const std::unordered_map<size_t, int64_t>& p_offset_map,
                                      const Ref<RectifiedScope>& p_scope);

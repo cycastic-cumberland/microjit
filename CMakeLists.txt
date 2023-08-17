@@ -10,13 +10,12 @@ add_definitions(-DASMJIT_STATIC)
 set(ASMJIT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/asmjit)
 
 #add_subdirectory(${GTEST_SOURCE_DIR})
-add_subdirectory(${ASMJIT_SOURCE_DIR})
+#add_subdirectory(${ASMJIT_SOURCE_DIR})
 
 #include_directories(${GTEST_SOURCE_DIR}/googletest/include)
 include_directories(${ASMJIT_SOURCE_DIR}/src)
 
 add_library(microjit
-            src/microjit/microjit.h
             src/microjit/helper.h
             src/microjit/safe_refcount.h
             src/microjit/def.h
@@ -28,7 +27,7 @@ add_library(microjit
             src/microjit/jit_x86_64.h
             src/microjit/jit_x86_64.cpp
             src/microjit/utils.h
+        src/microjit/instructions.cpp
 )
 
-
-target_link_libraries(microjit asmjit)
+#target_link_libraries(microjit asmjit)

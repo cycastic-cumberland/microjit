@@ -5,6 +5,7 @@
 #ifndef MICROJIT_ORCHESTRATOR_H
 #define MICROJIT_ORCHESTRATOR_H
 
+#include <stdexcept>
 #include "instructions.h"
 #include "utils.h"
 
@@ -13,15 +14,15 @@
 #endif
 
 namespace microjit {
-    template<class CompilerTy>
-    class OrchestratorComponent : public ThreadUnsafeObject {
+    template<class CompilerTy, class RefCounter = ThreadSafeObject>
+    class OrchestratorComponent : public RefCounter {
     public:
         typedef void(*VirtualStackFunction)(VirtualStack*);
 
         template<typename R, typename ...Args>
-        struct Instance : public ThreadUnsafeObject {
+        struct FunctionInstance : public RefCounter {
         private:
-            typedef OrchestratorComponent<CompilerTy> Host;
+            typedef OrchestratorComponent<CompilerTy, RefCounter> Host;
         private:
             const OrchestratorComponent* parent;
             const Ref<Function<R, Args...>> function;
@@ -31,32 +32,57 @@ namespace microjit {
             void compile_internal(std::function<R2(VirtualStack*, Args2...)>* p_func) const;
             template<typename ...Args2>
             void compile_internal(std::function<void(VirtualStack*, Args2...)>* p_func) const;
-            std::function<R(VirtualStack*)> get_bound_function(Args&&... args) const;
+
         public:
-            explicit Instance(const OrchestratorComponent* p_orchestrator)
+            explicit FunctionInstance(const OrchestratorComponent* p_orchestrator)
                 : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()} {}
             Ref<Function<R, Args...>> get_function() const { return function; }
             R call(Args&&... args) const;
             R call_with_vstack(VirtualStack* p_stack, Args&&... args) const;
             void recompile() const;
-            ~Instance() override = default;
+            ~FunctionInstance() override = default;
+            std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
+                compile_internal(&compiled_function);
+                return compiled_function;
+            }
+            std::function<R(Args...)> get_compiled_function() const {
+                auto f = get_full_compiled_function();
+                return [f](Args&&... args) -> R {
+                    // TODO: Make stack settings global
+                    auto stack = Box<VirtualStack>::make_box(1024 * 1024 * 8, 128);
+                    return f(stack.ptr(), std::forward<Args>(args)...);
+                };
+            }
         };
         template<typename R, typename ...Args>
         struct InstanceWrapper {
         private:
-            Ref<Instance<R, Args...>> instance;
+            Ref<FunctionInstance<R, Args...>> instance;
         public:
-            explicit InstanceWrapper(const Ref<Instance<R, Args...>>& p_instance) : instance(p_instance) {}
+            explicit InstanceWrapper(const Ref<FunctionInstance<R, Args...>>& p_instance) : instance(p_instance) {}
 
-            _NO_DISCARD_ Instance<R, Args...>* ptr() { return instance.ptr(); }
-            _NO_DISCARD_ const Instance<R, Args...>* ptr() const { return instance.ptr(); }
-            _NO_DISCARD_ Instance<R, Args...>* operator->() { return ptr(); }
-            _NO_DISCARD_ const Instance<R, Args...>* operator->() const { return ptr(); }
-            _NO_DISCARD_ Instance<R, Args...>* operator*() { return ptr(); }
-            _NO_DISCARD_ const Instance<R, Args...>* operator*() const { return ptr(); }
+            _NO_DISCARD_ FunctionInstance<R, Args...>* ptr() { return instance.ptr(); }
+            _NO_DISCARD_ const FunctionInstance<R, Args...>* ptr() const { return instance.ptr(); }
+            _NO_DISCARD_ FunctionInstance<R, Args...>* operator->() { return ptr(); }
+            _NO_DISCARD_ const FunctionInstance<R, Args...>* operator->() const { return ptr(); }
+            _NO_DISCARD_ FunctionInstance<R, Args...>* operator*() { return ptr(); }
+            _NO_DISCARD_ const FunctionInstance<R, Args...>* operator*() const { return ptr(); }
+            void recompile() const { instance->recompile(); }
+            std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
+                return instance->get_full_compiled_function();
+            }
+            std::function<R(Args...)> get_compiled_function() const {
+                return instance->get_compiled_function();
+            }
 
+            R call(Args&&... args) const {
+                return instance->call(std::forward<Args>(args)...);
+            }
+            R call_with_vstack(VirtualStack* p_stack, Args&&... args) const {
+                return instance->call_with_vstack(p_stack, std::forward<Args>(args)...);
+            }
             R operator()(Args&&... args) const {
-                return instance->call(args...);
+                return call(std::forward<Args>(args)...);
             }
         };
         struct InstanceHub {
@@ -74,7 +100,7 @@ namespace microjit {
         Ref<MicroJITRuntime> runtime{};
 
         std::unordered_map<size_t, VirtualStackFunction> function_map{};
-        std::unordered_map<size_t, Ref<ThreadUnsafeObject>> instance_map{};
+        std::unordered_map<size_t, Ref<RefCounter>> instance_map{};
     private:
         MicroJITCompiler::CompilationResult compile(const Ref<RectifiedFunction>& p_func) {
             return compiler->compile(p_func);
@@ -90,8 +116,7 @@ namespace microjit {
                 return function_map.at((size_t)p_func->host);
             } catch (const std::out_of_range&){
                 auto compilation_result = compile(p_func);
-                if (compilation_result.error) throw MicroJITException(std::string(__FILE__) +
-                    " at (" + __FUNCTION__  + ":" + std::to_string(__LINE__) + "): " + ("Compilation failed"));
+                if (compilation_result.error) MJ_RAISE("Compilation failed");
                 const auto cb = (VirtualStackFunction)compilation_result.assembly->callback;
                 add_function(cb, p_func);
                 return cb;
@@ -99,8 +124,8 @@ namespace microjit {
         }
         template<typename R, typename ...Args>
         InstanceWrapper<R, Args...> create_instance_internal() {
-            auto instance = Ref<Instance<R, Args...>>::make_ref(this);
-            instance_map[(size_t)(instance.ptr())] = instance.template c_style_cast<ThreadUnsafeObject>();
+            auto instance = Ref<FunctionInstance<R, Args...>>::make_ref(this);
+            instance_map[(size_t)(instance.ptr())] = instance.template c_style_cast<RefCounter>();
             return InstanceWrapper<R, Args...>(instance);
         }
     public:
@@ -119,38 +144,25 @@ namespace microjit {
         }
     };
 
-    template<class CompilerTy>
+    template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
-    void OrchestratorComponent<CompilerTy>::Instance<R, Args...>::recompile() const {
+    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::recompile() const {
         std::function<R(VirtualStack*, Args...)> dummy{};
         compiled_function.swap(dummy);
         compile_internal(&compiled_function);
     }
 
-    template<class CompilerTy>
+    template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
-    std::function<R(VirtualStack *)>
-    OrchestratorComponent<CompilerTy>::Instance<R, Args...>::get_bound_function(Args &&... args) const {
-        using namespace std::placeholders;
-        compile_internal(&compiled_function);
-        std::function<decltype(R(args...))(VirtualStack*)> bound_function = std::bind(std::forward<decltype(compiled_function)>(compiled_function),
-                                                                                      _1,
-                                                                                      std::forward<Args>(args)...);
-        return bound_function;
+    R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call_with_vstack(VirtualStack *p_stack,
+                                                                                        Args &&... args) const {
+        return (get_full_compiled_function())(p_stack, std::forward<Args>(args)...);
     }
 
-    template<class CompilerTy>
+    template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
-    R OrchestratorComponent<CompilerTy>::Instance<R, Args...>::call_with_vstack(VirtualStack *p_stack,
-                                                                                Args &&... args) const {
-        return get_bound_function(args...)(p_stack);
-    }
-
-    template<class CompilerTy>
-    template<typename R, typename... Args>
-    R OrchestratorComponent<CompilerTy>::Instance<R, Args...>::call(Args &&... args) const {
-        Box<VirtualStack> new_stack = Box<VirtualStack>::make_box(1024 * 1024 * 8, 128);
-        return call_with_vstack(new_stack.ptr(), args...);
+    R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call(Args &&... args) const {
+        return (get_compiled_function())(std::forward<Args>(args)...);
     }
 
     template<typename T>
@@ -160,10 +172,10 @@ namespace microjit {
         new (*stack_ptr) T(p_arg);
     }
 
-    template<class CompilerTy>
+    template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
     template<typename R2, typename... Args2>
-    void OrchestratorComponent<CompilerTy>::Instance<R, Args...>::compile_internal(
+    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
             std::function<R2(VirtualStack *, Args2...)> *p_func) const {
         static const auto hub_offset = ((size_t)(&(((Host*)0)->hub)));
 
@@ -186,10 +198,10 @@ namespace microjit {
         p_func->swap(new_func);
     }
 
-    template<class CompilerTy>
+    template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
     template<typename... Args2>
-    void OrchestratorComponent<CompilerTy>::Instance<R, Args...>::compile_internal(
+    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
             std::function<void(VirtualStack *, Args2...)> *p_func) const {
         static const auto hub_offset = ((size_t)(&(((Host*)0)->hub)));
 
@@ -208,16 +220,19 @@ namespace microjit {
         p_func->swap(new_func);
     }
 
-
-    template<class CompilerTy>
-    typename OrchestratorComponent<CompilerTy>::VirtualStackFunction
-    OrchestratorComponent<CompilerTy>::InstanceHub::fetch_function(const Ref<RectifiedFunction> &p_func) const {
+    template<class CompilerTy, class RefCounter>
+    typename OrchestratorComponent<CompilerTy, RefCounter>::VirtualStackFunction
+    OrchestratorComponent<CompilerTy, RefCounter>::InstanceHub::fetch_function(const Ref<RectifiedFunction> &p_func) const {
         return parent->fetch_function(p_func);
     }
 
 }
-
 #if defined(__x86_64__) || defined(_M_X64)
-    typedef microjit::OrchestratorComponent<microjit::MicroJITCompiler_x86_64> MicroJITOrchestrator;
+    typedef microjit::OrchestratorComponent<microjit::MicroJITCompiler_x86_64, microjit::ThreadSafeObject> x86_64Orchestrator;
+    typedef x86_64Orchestrator MicroJITOrchestrator;
 #endif
+
+namespace microjit {
+    static _ALWAYS_INLINE_ Ref<MicroJITOrchestrator> orchestrator() { return Ref<MicroJITOrchestrator>::make_ref(); }
+}
 #endif //MICROJIT_ORCHESTRATOR_H

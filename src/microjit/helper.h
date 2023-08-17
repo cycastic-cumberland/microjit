@@ -6,6 +6,7 @@
 #define MICROJIT_HELPER_H
 
 #include "def.h"
+#include "safe_refcount.h"
 
 namespace microjit {
     class ThreadUnsafeObject {
@@ -17,6 +18,16 @@ namespace microjit {
         bool unref() const { return --refcount == 0; }
         unsigned int get_reference_count() const { return refcount; }
         virtual ~ThreadUnsafeObject() = default;
+    };
+    class ThreadSafeObject {
+    private:
+        mutable SafeRefCount refcount{};
+    public:
+        void init_ref() const { refcount.init(); }
+        bool ref() const { return refcount.ref(); }
+        bool unref() const { return refcount.unref(); }
+        unsigned int get_reference_count() const { return refcount.get(); }
+        virtual ~ThreadSafeObject() = default;
     };
     template <class T>
     class Ref {
