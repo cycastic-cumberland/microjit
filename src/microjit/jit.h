@@ -30,15 +30,30 @@ namespace microjit {
             uint32_t error;
             Ref<Assembly> assembly;
         };
+        template<class T>
+        struct InstructionHasher {
+            size_t operator()(const Ref<T>& p_ins) const{
+                // Just get use the pointer as a hash lol
+                return size_t(p_ins.ptr());
+            }
+        };
+        struct StackFrameInfo : public ThreadUnsafeObject {
+        public:
+            size_t max_frame_size{};
+            uint32_t max_object_allocation{};
+            std::unordered_map<Ref<VariableInstruction>, int64_t, InstructionHasher<VariableInstruction>> variable_map{};
+        };
     protected:
         Ref<MicroJITRuntime> runtime;
         virtual CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) { return {}; }
+        static Ref<StackFrameInfo> create_frame_report(const Ref<RectifiedFunction>& p_func);
     public:
         static void raise_stack_overflown(){
-            static constexpr auto message = "MicroJIT instance: Stack overflown\n";
+            static constexpr char message[36] = "MicroJIT instance: Stack overflown\n";
             static constexpr int* the_funny = nullptr;
             fprintf(stderr, message);
             int a = *the_funny;
+            fprintf(stdout, "Well what now...");
         }
 
         explicit MicroJITCompiler(const Ref<MicroJITRuntime>& p_runtime) : runtime(p_runtime) {}

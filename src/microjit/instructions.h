@@ -110,13 +110,18 @@ namespace microjit {
             IT_COPY_CONSTRUCT,
             IT_ASSIGN,
             IT_RETURN,
+            IT_SCOPE_CREATE,
         };
     private:
         const InstructionType type;
+        
+        uint32_t scope_offset{};
+        friend class RectifiedScope;
     protected:
         explicit Instruction(const InstructionType& p_type) : type(p_type) {}
     public:
-        InstructionType get_instruction_type() const { return type; }
+        _ALWAYS_INLINE_ InstructionType get_instruction_type() const { return type; }
+        _ALWAYS_INLINE_ uint32_t get_scope_offset() const { return scope_offset; }
     };
 
     class Value : public ThreadUnsafeObject {
@@ -124,48 +129,14 @@ namespace microjit {
         enum ValueType {
             VAL_IMMEDIATE,
             VAL_ARGUMENT,
+            VAL_VARIABLE,
         };
     private:
-//        const Instruction* host{};
         const ValueType type;
-
-//        friend class RectifiedScope;
     protected:
         explicit Value(const ValueType& p_type) : type(p_type) {}
     public:
         ValueType get_value_type() const { return type; }
-    };
-
-    class ImmediateValue : public Value {
-    public:
-        void* data;
-        const Type imm_type;
-    private:
-        ImmediateValue(void* p_data, Type&& p_type) : Value(VAL_IMMEDIATE), data(p_data), imm_type(p_type) {}
-    public:
-        ~ImmediateValue() override {
-            auto dtor = (void (*)(void*))imm_type.destructor;
-            dtor(data);
-            free(data);
-        }
-        template<typename T>
-        static Ref<ImmediateValue> create(const T& p_value){
-            auto type = Type::create<T>();
-            auto data = malloc(type.size);
-            auto cc = (void (*)(void*, const void*))type.copy_constructor;
-            cc(data, &p_value);
-            auto ins = new ImmediateValue(data, std::move(type));
-            return Ref<ImmediateValue>::from_uninitialized_object(ins);
-        }
-    };
-
-    class ArgumentValue : public Value {
-    public:
-        const uint32_t& argument_index;
-    private:
-        explicit ArgumentValue(const uint32_t& p_idx) : Value(VAL_ARGUMENT), argument_index(p_idx) {}
-    public:
-        static Ref<ArgumentValue> create(const uint32_t& p_idx);
     };
 
     class ArgumentsDeclaration : public ThreadUnsafeObject {
@@ -206,28 +177,63 @@ namespace microjit {
             NONE = 0,
             CONST = 1,
         };
-        const uint32_t local_id;
         const RectifiedScope* parent_scope;
         const Type type;
         const uint32_t properties;
     private:
-        VariableInstruction(const uint32_t& p_local_id, const RectifiedScope* p_scope, Type p_type, const uint32_t& p_props)
+        VariableInstruction(const RectifiedScope* p_scope, Type p_type, const uint32_t& p_props)
             : Instruction(IT_DECLARE_VARIABLE),
-              local_id(p_local_id), parent_scope(p_scope), type(std::move(p_type)), properties(p_props) {}
+              parent_scope(p_scope), type(std::move(p_type)), properties(p_props) {}
     public:
         template<class T>
-        static Ref<VariableInstruction> create(const uint32_t& p_local_id, const RectifiedScope* p_scope, const uint32_t& p_props){
+        static Ref<VariableInstruction> create(const RectifiedScope* p_scope, const uint32_t& p_props){
             return Ref<VariableInstruction>::from_uninitialized_object(
-                    new VariableInstruction(p_local_id, p_scope, Type::create<T>(), p_props));
+                    new VariableInstruction(p_scope, Type::create<T>(), p_props));
         }
-        static Ref<VariableInstruction> create_string_literal(const uint32_t& p_local_id,
-                                                              const RectifiedScope* p_scope,
-                                                              const size_t& p_str_len){
-            return Ref<VariableInstruction>::from_uninitialized_object(
-                    new VariableInstruction(p_local_id, p_scope, Type::create_string_literal(p_str_len), Property::CONST));
-        }
-        
+
     };
+
+    class ImmediateValue : public Value {
+    public:
+        void* data;
+        const Type imm_type;
+    private:
+        ImmediateValue(void* p_data, Type&& p_type) : Value(VAL_IMMEDIATE), data(p_data), imm_type(p_type) {}
+    public:
+        ~ImmediateValue() override {
+            auto dtor = (void (*)(void*))imm_type.destructor;
+            dtor(data);
+            free(data);
+        }
+        template<typename T>
+        static Ref<ImmediateValue> create(const T& p_value){
+            auto type = Type::create<T>();
+            auto data = malloc(type.size);
+            auto cc = (void (*)(void*, const void*))type.copy_constructor;
+            cc(data, &p_value);
+            auto ins = new ImmediateValue(data, std::move(type));
+            return Ref<ImmediateValue>::from_uninitialized_object(ins);
+        }
+    };
+
+    class ArgumentValue : public Value {
+    public:
+        const uint32_t& argument_index;
+    private:
+        explicit ArgumentValue(const uint32_t& p_idx) : Value(VAL_ARGUMENT), argument_index(p_idx) {}
+    public:
+        static Ref<ArgumentValue> create(const uint32_t& p_idx);
+    };
+
+    class VariableValue : public Value {
+    public:
+        const Ref<VariableInstruction> variable;
+    private:
+        explicit VariableValue(const Ref<VariableInstruction>& p_var) : Value(VAL_VARIABLE), variable(p_var) {}
+    public:
+        static Ref<VariableValue> create(const Ref<VariableInstruction>& p_var);
+    };
+
     class ConstructInstruction : public Instruction {
     public:
         const Ref<VariableInstruction> target_variable;
@@ -268,6 +274,7 @@ namespace microjit {
             return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
         }
         static Ref<CopyConstructInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_arg_idx);
+        static Ref<CopyConstructInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target);
     };
     class AssignInstruction : public Instruction {
     public:
@@ -281,7 +288,7 @@ namespace microjit {
         template<typename T>
         static Ref<AssignInstruction> create_imm_unsafe(const Ref<VariableInstruction>& p_target, const T& p_value) {
             auto imm = ImmediateValue::create(p_value).template c_style_cast<Value>();
-            auto ins = new AssignInstruction(p_target, imm, ObjectTools::assign<T>);
+            auto ins = new AssignInstruction(p_target, imm, (const void*)ObjectTools::assign<T>);
             return Ref<AssignInstruction>::from_uninitialized_object(ins);
         }
         template<typename T>
@@ -294,7 +301,19 @@ namespace microjit {
         template<typename T>
         static Ref<AssignInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx){
             if (Type::create<T>() != p_target->type) MJ_RAISE("Mismatched type");
-            return create_arg_unsafe<T>(p_target, p_idx);
+            return create_arg_unsafe<T>(p_scope, p_target, p_idx);
+        }
+        template<typename T>
+        static Ref<AssignInstruction> create_var_unsafe(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
+            if (p_target->type != p_assign_target->type) MJ_RAISE("Mismatched type");
+            auto var = VariableValue::create(p_assign_target).c_style_cast<Value>();
+            auto ins = new AssignInstruction(p_target, var, (const void*)ObjectTools::assign<T>);
+            return Ref<AssignInstruction>::from_uninitialized_object(ins);
+        }
+        template<typename T>
+        static Ref<AssignInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
+            if (Type::create<T>() != p_target->type) MJ_RAISE("Mismatched type");
+            return create_var_unsafe<T>(p_target, p_assign_target);
         }
     };
 
@@ -302,23 +321,39 @@ namespace microjit {
     public:
         // null for void functions
         const Ref<VariableInstruction> return_var;
+    private:
+        explicit ReturnInstruction(const Ref<VariableInstruction>& p_ret)
+            : Instruction(IT_RETURN), return_var(p_ret) {}
+    public:
+        static Ref<ReturnInstruction> create(const Ref<VariableInstruction>& p_ret){
+            auto re = new ReturnInstruction(p_ret);
+            return Ref<ReturnInstruction>::from_uninitialized_object(re);
+        }
+    };
 
-        explicit ReturnInstruction(const Ref<VariableInstruction>& p_ret) : Instruction(IT_RETURN), return_var(p_ret) {}
+    class ScopeCreateInstruction : public Instruction {
+    public:
+        const Ref<RectifiedScope> scope;
+        explicit ScopeCreateInstruction(const Ref<RectifiedScope>& p_scope)
+            : Instruction(IT_SCOPE_CREATE), scope(p_scope) {}
     };
 
     class RectifiedScope : public ThreadUnsafeObject {
     private:
         const RectifiedScope* parent_scope;
         const Ref<ArgumentsDeclaration> arguments;
+        std::vector<Ref<RectifiedScope>> directly_owned_scopes{};
         std::vector<Ref<VariableInstruction>> variables{};
         std::vector<Ref<Instruction>> instructions{};
-        uint32_t current_local_id{};
+        uint32_t current_scope_offset{};
+
+        void push_instruction(Ref<Instruction> p_ins);
     public:
         explicit RectifiedScope(const Ref<ArgumentsDeclaration>& p_args, const RectifiedScope* p_parent = nullptr)
             : arguments(p_args), parent_scope(p_parent){}
         _NO_DISCARD_ const auto& get_arguments() const { return arguments; }
         _NO_DISCARD_ bool has_variable(const Ref<VariableInstruction>& p_var) const {
-            return (p_var.is_valid() && p_var->parent_scope == this && p_var->local_id <= current_local_id);
+            return (p_var.is_valid() && p_var->parent_scope == this && p_var->scope_offset <= current_scope_offset);
         }
         _NO_DISCARD_ bool has_variable_in_all_scope(const Ref<VariableInstruction>& p_var) const {
             return has_variable(p_var) || (parent_scope && parent_scope->has_variable_in_all_scope(p_var));
@@ -326,70 +361,93 @@ namespace microjit {
         template<typename T>
         Ref<VariableInstruction> create_variable(const uint32_t& p_props = VariableInstruction::NONE){
             // Create an anonymous ins
-            auto ins = VariableInstruction::create<T>(++current_local_id, this, p_props);
+            auto ins = VariableInstruction::create<T>(this, p_props);
             variables.push_back(ins);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<ConstructInstruction> default_construct_unsafe(const Ref<VariableInstruction>& p_var){
             if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
             auto ins = ConstructInstruction::create_unsafe<T>(p_var);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<ConstructInstruction> default_construct(const Ref<VariableInstruction>& p_var){
             if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
             auto ins = ConstructInstruction::create<T>(p_var);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<CopyConstructInstruction> construct_from_immediate(const Ref<VariableInstruction>& p_var, const T& p_imm){
             if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
             auto ins = CopyConstructInstruction::create_imm(p_var, p_imm);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
             if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
             auto ins = CopyConstructInstruction::create_arg(this, p_var, p_idx);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
+        Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
+            if (!has_variable(p_var)) MJ_RAISE("Does not own assignment target");
+            if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
+            auto ins = CopyConstructInstruction::create_var(p_var, p_copy_target);
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<AssignInstruction> assign_from_immediate_unsafe(const Ref<VariableInstruction>& p_var, const T& p_imm){
-            if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
+            if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
             auto ins = AssignInstruction::create_imm_unsafe(p_var, p_imm);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<AssignInstruction> assign_from_immediate(const Ref<VariableInstruction>& p_var, const T& p_imm){
-            if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
+            if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
             auto ins = AssignInstruction::create_imm(p_var, p_imm);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<AssignInstruction> assign_from_argument_unsafe(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
-            if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
+            if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
             auto ins = AssignInstruction::create_arg_unsafe<T>(this, p_var, p_idx);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename T>
         Ref<AssignInstruction> assign_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
-            if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
+            if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
             auto ins = AssignInstruction::create_arg<T>(this, p_var, p_idx);
-            instructions.push_back(ins.template c_style_cast<Instruction>());
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
+        template<typename T>
+        Ref<AssignInstruction> assign_from_variable_unsafe(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
+            if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own assignment target");
+            if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
+            auto ins = AssignInstruction::create_var_unsafe<T>(p_var, p_copy_target);
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
+        template<typename T>
+        Ref<AssignInstruction> assign_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
+            if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own assignment target");
+            if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
+            auto ins = AssignInstruction::create_var<T>(p_var, p_copy_target);
+            push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
         template<typename R>
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             // Does not own this variable;
-            if (p_var.is_null() || !has_variable(p_var)) MJ_RAISE("Does not own variable");
+            if (p_var.is_null() || !has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
             // Does not match the return type
             static const auto return_type = Type::create<R>();
             // If return type is void, then p_var must be null
@@ -397,13 +455,21 @@ namespace microjit {
                 if (p_var->type != return_type)
                     MJ_RAISE("Return type mismatched");
             } else if (p_var.is_valid()) MJ_RAISE("p_var must be invalid for functions that return 'void'");
-            auto return_instruction = Ref<ReturnInstruction>::make_ref(p_var);
-            instructions.push_back(return_instruction.template c_style_cast<Instruction>());
-            return return_instruction;
+            auto ins = ReturnInstruction::create(p_var);
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
+        Ref<ScopeCreateInstruction> create_scope(const Ref<RectifiedScope>& p_child){
+            if (p_child->parent_scope != this) MJ_RAISE("Child's parent is not self");
+            auto ins = Ref<ScopeCreateInstruction>::make_ref(p_child);
+            directly_owned_scopes.push_back(p_child);
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
         }
 
         _NO_DISCARD_ const auto& get_instructions() const { return instructions; }
         _NO_DISCARD_ const auto& get_variables() const { return variables; }
+        _NO_DISCARD_ const auto& get_scopes() const { return directly_owned_scopes; }
     };
 
     template <typename R, typename ...Args>
@@ -417,10 +483,6 @@ namespace microjit {
                 : parent_function(p_parent), parent_scope(p_parent_scope),
                   rectified_scope(Ref<RectifiedScope>::make_ref(p_parent->get_arguments_data(),
                                                                 parent_scope ? parent_scope->rectified_scope.ptr() : nullptr)) {}
-
-        Ref<Scope<R, Args...>> create_scope() {
-            return Ref<Scope<R, Args...>>::make_ref(parent_scope, this);
-        }
 
         bool has_variable(const Ref<VariableInstruction>& p_var) const {
             return rectified_scope->has_variable(p_var);
@@ -447,6 +509,9 @@ namespace microjit {
         Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
             return rectified_scope->construct_from_argument(p_var, p_idx);
         }
+        Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
+            return rectified_scope->construct_from_variable(p_var, p_copy_target);
+        }
         template<typename T>
         Ref<AssignInstruction> assign_from_immediate_unsafe(const Ref<VariableInstruction>& p_var, const T& p_imm){
             return rectified_scope->assign_from_immediate_unsafe<T>(p_var, p_imm);
@@ -463,8 +528,21 @@ namespace microjit {
         Ref<AssignInstruction> assign_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
             return rectified_scope->assign_from_argument<T>(p_var, p_idx);
         }
+        template<typename T>
+        Ref<AssignInstruction> assign_from_variable_unsafe(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
+            return rectified_scope->assign_from_variable_unsafe<T>(p_var, p_copy_target);
+        }
+        template<typename T>
+        Ref<AssignInstruction> assign_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
+            return rectified_scope->assign_from_variable<T>(p_var, p_copy_target);
+        }
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             return rectified_scope->function_return<R>(p_var);
+        }
+        Ref<Scope<R, Args...>> create_scope() {
+            auto new_scope = Ref<Scope<R, Args...>>::make_ref(parent_function, this);
+            rectified_scope->create_scope(new_scope->rectified_scope);
+            return new_scope;
         }
         _NO_DISCARD_ Ref<RectifiedScope> get_rectified_scope() const { return rectified_scope; }
     };
@@ -516,7 +594,7 @@ namespace microjit {
         if (types.size() <= p_idx) MJ_RAISE("Invalid argument index");
         if (types[p_idx] != p_target->type) MJ_RAISE("Mismatched type");
         auto arg = ArgumentValue::create(p_idx).c_style_cast<Value>();
-        auto ins = new AssignInstruction(p_target, arg, ObjectTools::assign<T>);
+        auto ins = new AssignInstruction(p_target, arg, (const void*)ObjectTools::assign<T>);
         return Ref<AssignInstruction>::from_uninitialized_object(ins);
     }
 }

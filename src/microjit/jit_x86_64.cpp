@@ -21,15 +21,6 @@ static constexpr auto esi = asmjit::x86::esi;
 
 static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
-//#define VERBOSE_ASSEMBLER_LOG
-
-#if defined(DEBUG_ENABLED) && defined(VERBOSE_ASSEMBLER_LOG)
-#include <iostream>
-
-#define AIN(m_action) std::cout << "[ASM: " << (__LINE__) << "]\t" << &(#m_action)[11] << "\n"; (m_action)
-#else
-#define AIN(m_action) (m_action)
-#endif
 #define STORE_VRBP asmjit::x86::qword_ptr(rbp, -(ptrs * 2))
 #define STORE_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 3))
 #define LOAD_VRBP asmjit::x86::qword_ptr(rbp, -(ptrs * 4))
@@ -71,12 +62,14 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     auto assembly = Ref<Assembly>::make_ref(runtime->get_asmjit_runtime());
     auto& assembler = assembly->assembler;
 
+    AINL("Prologue");
     AIN(assembler->push(rbp));
     AIN(assembler->mov(rbp, rsp));
     AIN(assembler->sub(rsp, ptrs * 5));
 
 
 
+    AINL("Setting up virtual stack");
     // Move the VirtualStack pointer from the first argument (rdi)
     // to the first slot of the stack
     AIN(assembler->mov(asmjit::x86::qword_ptr(rbp, -ptrs), rdi));
@@ -93,6 +86,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     // The real value of virtual rsp is now at rbp - 40
     AIN(assembler->mov(LOAD_VRSP, rbx));
 
+    AINL("Stack overflow test");
     // Invoke VirtualStack::capacity
     AIN(assembler->call(virtual_stack_get_capacity));
     // rbx = capacity
@@ -108,84 +102,135 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     AIN(assembler->call(MicroJITCompiler::raise_stack_overflown));
     AIN(assembler->bind(so_test_success));
 
-    // TODO: get max stack after scope support
-    size_t main_scope_stack_size = 0;
-    for (const auto& v : p_func->main_scope->get_variables()){
-        main_scope_stack_size += v->type.size;
+    auto frame_report = create_frame_report(p_func);
+    const auto& offset_map = frame_report->variable_map;
+    if (frame_report->max_frame_size){
+        AINL("Resizing virtual stack");
+        RESIZE_VSTACK(frame_report->max_frame_size);
     }
 
-    if (main_scope_stack_size){
-        RESIZE_VSTACK(main_scope_stack_size);
-    }
 
-    std::unordered_map<size_t, int64_t> variables_vstack_offset_map{};
-    const auto& instructions = p_func->main_scope->get_instructions();
-    uint32_t main_scope_wise_id_offset = 0;
-    int64_t scope_offset = 0;
-    int64_t local_offset = 0;
+    std::stack<ScopeInfo> scope_stack{};
+    scope_stack.push(ScopeInfo{p_func->main_scope, -1, Box<asmjit::Label>()});
+    while (!scope_stack.empty()){
+        auto current = scope_stack.top();
+        current.iterating++;
+        scope_stack.pop();
+        if (current.label.is_null()){
+            current.label = Box<asmjit::Label>::make_box(asmjit::Label(assembler->newLabel()));
+            AIN(assembler->bind(*(current.label.ptr())));
+        }
 
-    for (size_t i = 0, s = instructions.size(); i < s; i++){
-        const auto& current_instruction = instructions[i];
-        switch (current_instruction->get_instruction_type()) {
-            case Instruction::IT_DECLARE_VARIABLE: {
-                auto as_var_decl = current_instruction.c_style_cast<VariableInstruction>();
-                local_offset -= int64_t(as_var_decl->type.size);
-                variables_vstack_offset_map[(size_t)as_var_decl.ptr()] = scope_offset + local_offset;
-                // It's only job is declare
-                break;
-            }
-            case Instruction::IT_RETURN: {
-                auto as_return = current_instruction.c_style_cast<ReturnInstruction>();
-                // is void
-                if (p_func->return_type.size == 0) break;
-                const auto& return_variable = as_return->return_var;
-                auto vstack_offset = variables_vstack_offset_map.at((size_t)return_variable.ptr());
-                AIN(assembler->mov(rcx, LOAD_VRBP));
-                AIN(assembler->mov(rbx, rcx));
-                AIN(assembler->sub(rcx, std::abs(vstack_offset)));
-
-                VAR_COPY(return_variable);
-
-                call_destructors(assembler, variables_vstack_offset_map, p_func->main_scope);
-                break;
-            }
-            case Instruction::IT_CONSTRUCT:{
-                auto as_ctor = current_instruction.c_style_cast<ConstructInstruction>();
-                auto vstack_offset = variables_vstack_offset_map.at((size_t)as_ctor->target_variable.ptr());
-                AIN(assembler->mov(rdi, LOAD_VRBP));
-                AIN(assembler->sub(rdi, std::abs(vstack_offset)));
-                AIN(assembler->call(as_ctor->ctor));
-                break;
-            }
-            case Instruction::IT_COPY_CONSTRUCT:{
-                auto as_cc = current_instruction.c_style_cast<CopyConstructInstruction>();
-                switch (as_cc->value_reference->get_value_type()) {
-                    case Value::VAL_IMMEDIATE: {
-                        auto vstack_offset = variables_vstack_offset_map.at((size_t)as_cc->target_variable.ptr());
-                        AIN(assembler->mov(rdi, LOAD_VRBP));
-                        AIN(assembler->sub(rdi, std::abs(vstack_offset)));
-                        if (as_cc->target_variable->type.is_fundamental)
-                            copy_immediate_primitive(assembler, as_cc);
-                        else copy_immediate(assembler, as_cc);
-                        break;
-                    }
-                    case Value::VAL_ARGUMENT: {
-                        auto as_arg = as_cc->value_reference.c_style_cast<ArgumentValue>();
-                        auto arg_offset = p_func->arguments->argument_offsets()[as_arg->argument_index];
-                        arg_offset += p_func->return_type.size;
-                        auto vstack_offset = variables_vstack_offset_map.at((size_t)as_cc->target_variable.ptr());
-                        copy_argument(assembler, as_cc, vstack_offset, arg_offset);
-                        break;
-                    }
+        const auto& instructions = current.scope->get_instructions();
+        for (auto s = int64_t(instructions.size()); current.iterating < s; current.iterating++){
+            const auto& current_instruction = instructions[current.iterating];
+            bool loop_break = false;
+            switch (current_instruction->get_instruction_type()) {
+                case Instruction::IT_CONSTRUCT: {
+                    AINL("Constructing variable " << (size_t)current_instruction.ptr());
+                    auto as_ctor = current_instruction.c_style_cast<ConstructInstruction>();
+                    auto vstack_offset = offset_map.at(as_ctor->target_variable);
+                    AIN(assembler->mov(rdi, LOAD_VRBP));
+                    AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                    AIN(assembler->call(as_ctor->ctor));
+                    break;
                 }
-                break;
+                case Instruction::IT_COPY_CONSTRUCT: {
+                    auto as_cc = current_instruction.c_style_cast<CopyConstructInstruction>();
+                    AINL("Copy constructing variable " << (size_t)as_cc->target_variable.ptr());
+                    auto vstack_offset = offset_map.at(as_cc->target_variable);
+                    switch (as_cc->value_reference->get_value_type()) {
+                        case Value::VAL_IMMEDIATE: {
+                            AIN(assembler->mov(rdi, LOAD_VRBP));
+                            AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                            if (as_cc->target_variable->type.is_fundamental)
+                                copy_immediate_primitive(assembler, as_cc);
+                            else copy_immediate(assembler, as_cc);
+                            break;
+                        }
+                        case Value::VAL_ARGUMENT: {
+                            auto as_arg = as_cc->value_reference.safe_cast<ArgumentValue>();
+                            auto arg_offset = p_func->arguments->argument_offsets()[as_arg->argument_index];
+                            arg_offset += p_func->return_type.size;
+                            copy_variable(assembler, as_cc, vstack_offset, arg_offset);
+                            break;
+                        }
+                        case Value::VAL_VARIABLE: {
+                            auto as_var_val = as_cc->value_reference.c_style_cast<VariableValue>();
+                            auto copy_target_offset = offset_map.at(as_var_val->variable);
+                            copy_variable(assembler, as_cc, vstack_offset,
+                                          copy_target_offset);
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case Instruction::IT_ASSIGN: {
+                    auto as_assign = current_instruction.c_style_cast<AssignInstruction>();
+                    AINL("Assigning variable " << (size_t)as_assign->target_variable.ptr());
+                    auto vstack_offset = offset_map.at(as_assign->target_variable);
+                    switch (as_assign->value_reference->get_value_type()) {
+                        case Value::VAL_IMMEDIATE: {
+                            AIN(assembler->mov(rdi, LOAD_VRBP));
+                            AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                            if (as_assign->target_variable->type.is_fundamental)
+                                copy_immediate_primitive(assembler, as_assign);
+                            else copy_immediate(assembler, as_assign);
+                            break;
+                        }
+                        case Value::VAL_ARGUMENT: {
+                            auto as_arg = as_assign->value_reference.c_style_cast<ArgumentValue>();
+                            auto arg_offset = p_func->arguments->argument_offsets()[as_arg->argument_index];
+                            arg_offset += p_func->return_type.size;
+                            assign_variable(assembler, as_assign, vstack_offset, arg_offset);
+                            break;
+                        }
+                        case Value::VAL_VARIABLE: {
+                            auto as_var_val = as_assign->value_reference.c_style_cast<VariableValue>();
+                            auto copy_target_offset = offset_map.at(as_var_val->variable);
+                            assign_variable(assembler, as_assign, vstack_offset,
+                                            copy_target_offset);
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case Instruction::IT_RETURN: {
+                    auto as_return = current_instruction.c_style_cast<ReturnInstruction>();
+                    AINL("Returning variable " << (size_t)as_return->return_var.ptr());
+                    // is void
+                    if (p_func->return_type.size == 0) break;
+                    const auto& return_variable = as_return->return_var;
+                    auto vstack_offset = offset_map.at(return_variable);
+                    AIN(assembler->mov(rcx, LOAD_VRBP));
+                    AIN(assembler->mov(rbx, rcx));
+                    AIN(assembler->sub(rcx, std::abs(vstack_offset)));
+
+                    VAR_COPY(return_variable);
+
+                    AINL("Destructing all stack items");
+                    // Push the current frame so it can be destroyed
+                    scope_stack.push(current);
+                    iterative_destructor_call(assembler, frame_report, scope_stack);
+//                    arguments_destructor_call(assembler, p_func->arguments);
+                    loop_break = true;
+                    break;
+                }
+                case Instruction::IT_SCOPE_CREATE: {
+                    AINL("Creating new scope");
+                    scope_stack.push(current);
+                    scope_stack.push(
+                            ScopeInfo{current_instruction.c_style_cast<ScopeCreateInstruction>()->scope,
+                                      -1, Box<asmjit::Label>()});
+                    loop_break = true;
+                    break;
+                }
+                case Instruction::IT_NONE:
+                case Instruction::IT_DECLARE_VARIABLE:
+                default:
+                    break;
             }
-            case Instruction::IT_ASSIGN:{
-                auto as_assign = current_instruction.c_style_cast<AssignInstruction>();
-                break;
-            }
-            case Instruction::IT_NONE:
-                break;
+            if (loop_break) break;
         }
     }
 
@@ -196,99 +241,78 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
 
     return { 0, assembly };
 }
-
-void microjit::MicroJITCompiler_x86_64::copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                                                 const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction) {
-    const auto& type_data = p_instruction->target_variable->type;
-    auto imm = p_instruction->value_reference.c_style_cast<ImmediateValue>();
-    auto as_byte_array = imm->data;
-    switch (type_data.size) {
-        case 1:
-            AIN(assembler->mov(asmjit::x86::cl, *(const uint8_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::byte_ptr(rdi), asmjit::x86::cl));
-            break;
-        case 2:
-            AIN(assembler->mov(asmjit::x86::cx, *(const uint16_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::word_ptr(rdi), asmjit::x86::cx));
-            break;
-        case 4:
-            AIN(assembler->mov(asmjit::x86::ecx, *(const uint32_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::dword_ptr(rdi), asmjit::x86::ecx));
-            break;
-        case 8:
-            AIN(assembler->mov(asmjit::x86::rcx, *(const uint64_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::qword_ptr(rdi), asmjit::x86::rcx));
-            break;
-    }
-}
-
-void microjit::MicroJITCompiler_x86_64::copy_immediate(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                                       const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction) {
-    const auto& type_data = p_instruction->target_variable->type;
-    auto imm = p_instruction->value_reference.c_style_cast<ImmediateValue>();
-    // The value to be copied, as byte array
-    auto as_byte_array = imm->data;
-    // Copy destination is currently in rdi
-    // Allocate immediate value space on real stack
-    // Copy the value onto real stack, byte by byte
-    AIN(assembler->sub(rsp, type_data.size));
-    // Copying by receding chunks did not work, not sure why
-    // Copying bytes-by-bytes would have to do it for now
-    switch (type_data.size) {
-        case 1:{
-            AIN(assembler->mov(asmjit::x86::byte_ptr(rsp), *(const uint8_t*)as_byte_array));
-            break;
-        }
-        case 2:{
-            AIN(assembler->mov(asmjit::x86::word_ptr(rsp), *(const uint16_t*)as_byte_array));
-            break;
-        }
-        case 4:{
-            AIN(assembler->mov(asmjit::x86::dword_ptr(rsp), *(const uint32_t*)as_byte_array));
-            break;
-        }
-        case 8:{
-            AIN(assembler->mov(rcx, *(const uint64_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::qword_ptr(rsp), rcx));
-            break;
-        }
-        default:{
-            for (auto seek = decltype(type_data.size)(); seek < type_data.size; seek++) {
-                AIN(assembler->mov(asmjit::x86::byte_ptr(rsp, seek), ((const uint8_t*)as_byte_array)[seek]));
-            }
-        }
-    }
-    // Move copy target (which is going to be real rsp) to rsi
-    AIN(assembler->mov(rsi, rsp));
-    // Call copy constructor
-    AIN(assembler->call(p_instruction->ctor));
-    // Return the stack space
-    AIN(assembler->add(rsp, type_data.size));
-}
-
-void microjit::MicroJITCompiler_x86_64::copy_argument(microjit::Box<asmjit::x86::Assembler> &assembler,
+void microjit::MicroJITCompiler_x86_64::copy_variable(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                       const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction,
                                                       const int64_t& p_offset,
-                                                      const uint32_t& p_arg_offset) {
+                                                      const int64_t& p_copy_target) {
     const auto& type_data = p_instruction->target_variable->type;
     auto arg = p_instruction->value_reference.c_style_cast<ArgumentValue>();
     AIN(assembler->mov(rbx, LOAD_VRBP));
     AIN(assembler->mov(rcx, rbx));
     AIN(assembler->sub(rbx, std::abs(p_offset)));
     // argument_offset = return_size + relative_offset
-    AIN(assembler->add(rcx, p_arg_offset));
+    if (p_copy_target >= 0)
+        AIN(assembler->add(rcx, p_copy_target));
+    else
+        AIN(assembler->sub(rcx, std::abs(p_copy_target)));
     VAR_COPY(p_instruction->target_variable);
 }
 
-void microjit::MicroJITCompiler_x86_64::call_destructors(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                                         const std::unordered_map<size_t, int64_t> &p_offset_map,
-                                                         const microjit::Ref<microjit::RectifiedScope> &p_scope) {
-    for (const auto& var : p_scope->get_variables()){
-        auto vstack_offset = p_offset_map.at((size_t)var.ptr());
-        if (var->type.is_fundamental) continue;
-        AIN(assembler->mov(rdi, LOAD_VRBP));
-        AIN(assembler->sub(rdi, std::abs(vstack_offset)));
-        AIN(assembler->call(var->type.destructor));
+
+void microjit::MicroJITCompiler_x86_64::assign_variable(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                        const microjit::Ref<microjit::AssignInstruction> &p_instruction,
+                                                        const int64_t &p_offset, const int64_t &p_copy_target) {
+    const auto& type_data = p_instruction->target_variable->type;
+    auto arg = p_instruction->value_reference.c_style_cast<ArgumentValue>();
+    AIN(assembler->mov(rbx, LOAD_VRBP));
+    AIN(assembler->mov(rcx, rbx));
+    AIN(assembler->sub(rbx, std::abs(p_offset)));
+    if (p_copy_target >= 0)
+        AIN(assembler->add(rcx, p_copy_target));
+    else
+        AIN(assembler->sub(rcx, std::abs(p_copy_target)));
+    const auto& target_var = p_instruction->target_variable;
+    if (!target_var->type.is_fundamental){
+        AIN(assembler->mov(asmjit::x86::rdi, rbx));
+        AIN(assembler->mov(asmjit::x86::rsi, rcx));
+        AIN(assembler->call(p_instruction->ctor));
+    } else {
+        switch (target_var->type.size) {
+            case 1:
+                AIN(assembler->mov(asmjit::x86::dl, asmjit::x86::byte_ptr(asmjit::x86::rcx)));
+                AIN(assembler->mov(asmjit::x86::byte_ptr(rbx), asmjit::x86::dl));
+                break;
+            case 2:
+                AIN(assembler->mov(asmjit::x86::dx, asmjit::x86::word_ptr(asmjit::x86::rcx)));
+                AIN(assembler->mov(asmjit::x86::word_ptr(rbx), asmjit::x86::dx));
+                break;
+            case 4:
+                AIN(assembler->mov(asmjit::x86::edx, asmjit::x86::dword_ptr(asmjit::x86::rcx)));
+                AIN(assembler->mov(asmjit::x86::dword_ptr(rbx), asmjit::x86::edx));
+                break;
+            case 8:
+                AIN(assembler->mov(asmjit::x86::rdx, asmjit::x86::qword_ptr(asmjit::x86::rcx)));
+                AIN(assembler->mov(asmjit::x86::qword_ptr(rbx), asmjit::x86::rdx));
+                break;
+        }
+    }
+}
+
+void microjit::MicroJITCompiler_x86_64::iterative_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                                  const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
+                                                                  std::stack<ScopeInfo> &p_scope_stack) {
+    while (!p_scope_stack.empty()){
+        auto current = p_scope_stack.top();
+        p_scope_stack.pop();
+        for (const auto& var : current.scope->get_variables()){
+            if (var->type.is_fundamental) continue;
+            // If variable is yet to be constructed
+            if (var->get_scope_offset() > current.iterating) break;
+            auto vstack_offset = p_frame_info->variable_map.at(var);
+            AIN(assembler->mov(rdi, LOAD_VRBP));
+            AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+            AIN(assembler->call(var->type.destructor));
+        }
     }
 }
 

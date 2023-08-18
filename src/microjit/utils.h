@@ -8,7 +8,7 @@
 #include <exception>
 #include <string>
 
-#define MJ_RAISE(msg) throw MicroJITException(std::string(__FILE__) + " at (" + __FUNCTION__  + ":" + std::to_string(__LINE__) + "): " + (msg))
+#define MJ_RAISE(msg) throw MicroJITException(std::string(__FILE__) + " at (" + __FUNCTION__  + " : " + std::to_string(__LINE__) + "): " + (msg))
 
 namespace microjit {
 class MicroJITException : public std::exception {

@@ -20,3 +20,21 @@ microjit::CopyConstructInstruction::create_arg(const microjit::RectifiedScope *p
     return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
 }
 
+microjit::Ref<microjit::CopyConstructInstruction>
+microjit::CopyConstructInstruction::create_var(const microjit::Ref<microjit::VariableInstruction> &p_target,
+                                               const microjit::Ref<microjit::VariableInstruction> &p_assign_target) {
+    if (p_target->type != p_assign_target->type) MJ_RAISE("Mismatched type");
+    auto var = VariableValue::create(p_assign_target).c_style_cast<Value>();
+    auto ins = new CopyConstructInstruction(p_target, var, (const void*)p_target->type.copy_constructor);
+    return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
+}
+
+microjit::Ref<microjit::VariableValue>
+microjit::VariableValue::create(const microjit::Ref<microjit::VariableInstruction>& p_var){
+    return Ref<VariableValue>::from_uninitialized_object(new VariableValue(p_var));
+}
+
+void microjit::RectifiedScope::push_instruction(Ref<Instruction> p_ins){
+    p_ins->scope_offset = current_scope_offset++;
+    instructions.push_back(p_ins);
+}

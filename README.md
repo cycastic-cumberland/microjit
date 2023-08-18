@@ -1,9 +1,9 @@
 # MicroJIT
 
 
-MicroJIT is a lightweight Just-In-Time compiler designed in C++, for C++.
+MicroJIT is a lightweight Just-In-Time compilation library designed in C++.
 
-**This project is in the early stage of its lifetime so most feature currently does not work, correctly or at all**
+**This project is in the early stage of its lifetime so most features currently do not work, correctly or at all**
 
 ## Requirement
 
@@ -14,7 +14,7 @@ MicroJIT makes extensive use of variadic template, which require C++ 17 or above
 To use MicroJIT, start by cloning this repo to your CMake project:
 
 ```shell
-git clone --recurse-submodules github.com/cycastic-cumberland/microjit
+git clone --recurse-submodules https://github.com/cycastic-cumberland/microjit.git
 ```
 
 Add these lines to your CMakeLists.txt:
@@ -32,6 +32,18 @@ include_directories(${MICROJIT_SOURCE_DIR}/src)
 target_link_libraries(your_project_name asmjit microjit)
 ```
 
+
+## Motivation
+
+The creation of MicroJIT stems from the need for compiler for my own programming language.
+Due to its nature, the language must either parse or compile its bytecode at runtime, so I decided to look
+into JIT compilers. Despite how hard I look, I could only find two libraries that fits my criteria:
+NativeJIT and AsmJit. NativeJIT is made by the team behind Bing, but it has gone inactive for years now,
+and I find its documentary lacking. AsmJit is an active project, is well documented and has many contributors,
+but its APIs are not user-friendly, without the integration of a lot of C++ features.
+That's why decided to create a library on top of AsmJit, which (will) make it easier for C++ developers
+to dynamically generate codes. 
+
 ## Usage
 
 Start by including `microjit/orchestrator.h`
@@ -40,7 +52,7 @@ The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and cac
 
 All othe major components of MicroJIT are also reference counted (albeit not atomically), so no further memory management is needed.
 
-An `Instance` is an utility class which manage and compile your functions. `Instance` support lazy compilation, the first time it is invoked, it will forward the compilation request to the Orchestrator, which will in turn return the compiled callback, provided by AsmJit. Any subsequence invocation will use the compiled callback.
+An `Instance` is a utility class which manage and compile your functions. `Instance` support lazy compilation, the first time it is invoked, it will forward the compilation request to the Orchestrator, which will in turn return the compiled callback, provided by AsmJit. Any subsequence invocation will use the compiled callback.
 
 The Orchestrator actually return an `InstanceWrapper` instead of the `Instance` itself, but you could use it by dereferencing the `InstanceWrapper`.
 
@@ -78,8 +90,10 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 - [x] Return value
 - [x] Orchestrator's basic functionalities
 - [x] Compilation cache
+- [x] Construction/Copy construction/Destruction
 - [x] Virtual stack extraction
-- [ ] Multiple scopes
+- [x] Multiple scopes
+- [ ] Operations (and overloaded operator call)
 - [ ] Branches (if/else/for/while)
 - [ ] Native function call
 - [ ] JIT compiled function call
@@ -90,15 +104,18 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 ### Advanced features
 
 - [ ] Asynchronous compilation
+- [ ] Optimization
 - [ ] x86 support
 - TBA...
 
 ## Targets
 
+This library has been tested on the following target(s):
+
 |        | gcc (Linux) | clang (Linux) | MSVC (Windows) | MinGW (Windows) |
-|--------|-------------|---------------|----------------|-----------------|
-| x86    | [ ]         | [ ]           | [ ]            | [ ]             |
-| x86_64 | [x]         | [ ]           | [ ]            | [ ]             |
+|--------|-------------|:-------------:|----------------|-----------------|
+| x86    |             |               |                |                 |
+| x86_64 |             |   &#10004;    |                |                 |
 
 
 ## License

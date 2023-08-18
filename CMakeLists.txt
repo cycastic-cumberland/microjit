@@ -28,6 +28,7 @@ add_library(microjit
             src/microjit/jit_x86_64.cpp
             src/microjit/utils.h
         src/microjit/instructions.cpp
+        src/microjit/jit.cpp
 )
 
 #target_link_libraries(microjit asmjit)

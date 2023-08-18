@@ -14,6 +14,10 @@
 #endif
 
 namespace microjit {
+    struct VirtualStackSettings {
+        size_t vstack_default_size = 1024 * 1024 * 8;
+        size_t vstack_buffer_size = 128;
+    };
     template<class CompilerTy, class RefCounter = ThreadSafeObject>
     class OrchestratorComponent : public RefCounter {
     public:
@@ -27,6 +31,7 @@ namespace microjit {
             const OrchestratorComponent* parent;
             const Ref<Function<R, Args...>> function;
             mutable std::function<R(VirtualStack*, Args...)> compiled_function{};
+            const VirtualStackSettings& settings;
         private:
             template<typename R2, typename ...Args2>
             void compile_internal(std::function<R2(VirtualStack*, Args2...)>* p_func) const;
@@ -34,8 +39,7 @@ namespace microjit {
             void compile_internal(std::function<void(VirtualStack*, Args2...)>* p_func) const;
 
         public:
-            explicit FunctionInstance(const OrchestratorComponent* p_orchestrator)
-                : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()} {}
+            explicit FunctionInstance(const OrchestratorComponent* p_orchestrator);
             Ref<Function<R, Args...>> get_function() const { return function; }
             R call(Args&&... args) const;
             R call_with_vstack(VirtualStack* p_stack, Args&&... args) const;
@@ -47,9 +51,10 @@ namespace microjit {
             }
             std::function<R(Args...)> get_compiled_function() const {
                 auto f = get_full_compiled_function();
-                return [f](Args&&... args) -> R {
-                    // TODO: Make stack settings global
-                    auto stack = Box<VirtualStack>::make_box(1024 * 1024 * 8, 128);
+                auto size = settings.vstack_default_size;
+                auto buffer = settings.vstack_buffer_size;
+                return [f, size, buffer](Args&&... args) -> R {
+                    auto stack = Box<VirtualStack>::make_box(size, buffer);
                     return f(stack.ptr(), std::forward<Args>(args)...);
                 };
             }
@@ -91,17 +96,20 @@ namespace microjit {
         public:
             explicit InstanceHub(OrchestratorComponent* p_orchestrator) : parent(p_orchestrator) {}
             _NO_DISCARD_ VirtualStackFunction fetch_function(const Ref<RectifiedFunction> &p_func) const;
+            _NO_DISCARD_ const VirtualStackSettings& get_settings() const;
         };
     private:
         friend struct InstanceHub;
 
         const InstanceHub hub;
+        VirtualStackSettings settings;
         Ref<CompilerTy> compiler{};
         Ref<MicroJITRuntime> runtime{};
 
         std::unordered_map<size_t, VirtualStackFunction> function_map{};
         std::unordered_map<size_t, Ref<RefCounter>> instance_map{};
     private:
+        const VirtualStackSettings& get_settings() const { return settings; }
         MicroJITCompiler::CompilationResult compile(const Ref<RectifiedFunction>& p_func) {
             return compiler->compile(p_func);
         }
@@ -142,7 +150,19 @@ namespace microjit {
         InstanceWrapper<R, Args...> create_instance_from_model(const std::function<R(Args...)>&) {
             return create_instance_internal<R, Args...>();
         }
+        _NO_DISCARD_ VirtualStackSettings& edit_vstack_settings() { return settings; }
     };
+
+    template<class CompilerTy, class RefCounter>
+    template<typename R, typename... Args>
+    OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::FunctionInstance(
+            const OrchestratorComponent *p_orchestrator) : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()},
+                                                           settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()) {}
+
+    template<class CompilerTy, class RefCounter>
+    const VirtualStackSettings &OrchestratorComponent<CompilerTy, RefCounter>::InstanceHub::get_settings() const {
+        return parent->get_settings();
+    }
 
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
@@ -171,6 +191,23 @@ namespace microjit {
         *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) - sizeof(T));
         new (*stack_ptr) T(p_arg);
     }
+    template<typename T>
+    static _ALWAYS_INLINE_ void destruct_argument(const T &, VirtualStack *p_stack){
+        static const bool trivially_destructed = std::is_trivially_destructible<T>::value;
+        auto stack_ptr = p_stack->rsp();
+        if (!trivially_destructed)
+            ((T*)*stack_ptr)->~T();
+        *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) + sizeof(T));
+    }
+
+    template<typename T>
+    static _ALWAYS_INLINE_ void destruct_return(VirtualStack *p_stack){
+        static const bool trivially_destructed = std::is_trivially_destructible<T>::value;
+        auto stack_ptr = p_stack->rsp();
+        if (!trivially_destructed)
+            ((T*)*stack_ptr)->~T();
+        *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) + sizeof(T));
+    }
 
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
@@ -186,14 +223,19 @@ namespace microjit {
             auto old_rbp = *p_stack->rbp();
             auto old_rsp = *p_stack->rsp();
             (move_argument<Args2>(args, p_stack), ...);
-            const auto return_slot = (VirtualStack::StackPtr)((size_t)(*p_stack->rsp()) - sizeof(R2));
+            const auto return_slot = (VirtualStack::StackPtr)((size_t)*p_stack->rsp() - sizeof(R2));
             (*p_stack->rbp()) = return_slot;
             (*p_stack->rsp()) = return_slot;
             cb(p_stack);
-            auto re = (R2*)return_slot;
+            auto re = *(R2*)return_slot;
+            // After copying the return value, destroy its stack entry
+            destruct_return<R2>(p_stack);
+            if (sizeof...(Args)){
+                (destruct_argument<Args2>(args, p_stack), ...);
+            }
             *p_stack->rbp() = old_rbp;
             *p_stack->rsp() = old_rsp;
-            return *re;
+            return re;
         };
         p_func->swap(new_func);
     }
@@ -212,8 +254,13 @@ namespace microjit {
             auto old_rbp = *p_stack->rbp();
             auto old_rsp = *p_stack->rsp();
             (move_argument<Args2>(args, p_stack), ...);
+            auto args_end = *p_stack->rsp();
             *p_stack->rbp() = *p_stack->rsp();
             cb(p_stack);
+            if (sizeof...(Args)){
+                *p_stack->rsp() = args_end;
+                (destruct_argument<Args2>(args, p_stack), ...);
+            }
             *p_stack->rbp() = old_rbp;
             *p_stack->rsp() = old_rsp;
         };
