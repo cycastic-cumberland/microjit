@@ -105,6 +105,7 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 
 - [ ] Asynchronous compilation
 - [ ] Optimization
+- [ ] Automatic implicit conversion 
 - [ ] x86 support
 - TBA...
 

@@ -396,6 +396,7 @@ namespace microjit {
         Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
             if (!has_variable(p_var)) MJ_RAISE("Does not own assignment target");
             if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
+            if (p_var == p_copy_target) MJ_RAISE("Assign and copy target must not be the same");
             auto ins = CopyConstructInstruction::create_var(p_var, p_copy_target);
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
@@ -432,6 +433,7 @@ namespace microjit {
         Ref<AssignInstruction> assign_from_variable_unsafe(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
             if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own assignment target");
             if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
+            if (p_var == p_copy_target) MJ_RAISE("Assign and copy target must not be the same");
             auto ins = AssignInstruction::create_var_unsafe<T>(p_var, p_copy_target);
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
@@ -440,6 +442,7 @@ namespace microjit {
         Ref<AssignInstruction> assign_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
             if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own assignment target");
             if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
+            if (p_var == p_copy_target) MJ_RAISE("Assign and copy target must not be the same");
             auto ins = AssignInstruction::create_var<T>(p_var, p_copy_target);
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;

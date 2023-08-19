@@ -61,13 +61,10 @@ microjit::MicroJITCompiler::CompilationResult
 microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
     auto assembly = Ref<Assembly>::make_ref(runtime->get_asmjit_runtime());
     auto& assembler = assembly->assembler;
-
     AINL("Prologue");
     AIN(assembler->push(rbp));
     AIN(assembler->mov(rbp, rsp));
     AIN(assembler->sub(rsp, ptrs * 5));
-
-
 
     AINL("Setting up virtual stack");
     // Move the VirtualStack pointer from the first argument (rdi)
@@ -133,6 +130,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     AIN(assembler->mov(rdi, LOAD_VRBP));
                     AIN(assembler->sub(rdi, std::abs(vstack_offset)));
                     AIN(assembler->call(as_ctor->ctor));
+
                     break;
                 }
                 case Instruction::IT_COPY_CONSTRUCT: {
