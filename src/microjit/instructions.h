@@ -18,6 +18,7 @@
 #include "helper.h"
 #include "virtual_stack.h"
 #include "utils.h"
+#include "primitive_conversion_map.gen.h"
 
 namespace microjit {
     class ObjectTools {
@@ -35,9 +36,10 @@ namespace microjit {
         }
         template<class T>
         static void dtor(T* p_obj) { p_obj->~T(); }
-
         template<class T>
-        static void assign(T* p_obj, const T* copy_target) { *p_obj = *p_obj; }
+        static void assign(T* p_obj, const T* copy_target) { *p_obj = *copy_target; }
+        template<typename From, typename To>
+        static void convert(const From* p_from, To* p_to){ *p_to = *p_from; }
 
         static void empty_ctor(void*) {  }
         static void empty_copy_ctor(void*, void*) {  }
@@ -77,10 +79,10 @@ namespace microjit {
         }
 
     public:
-        _NO_DISCARD_ bool operator==(const Type& p_right) const {
+        _NO_DISCARD_ _ALWAYS_INLINE_ bool operator==(const Type& p_right) const {
             return type_index == p_right.type_index;
         }
-        _NO_DISCARD_ bool operator!=(const Type& p_right) const {
+        _NO_DISCARD_ _ALWAYS_INLINE_ bool operator!=(const Type& p_right) const {
             return type_index != p_right.type_index;
         }
 
@@ -111,6 +113,8 @@ namespace microjit {
             IT_ASSIGN,
             IT_RETURN,
             IT_SCOPE_CREATE,
+            IT_CONVERT,
+            IT_PRIMITIVE_CONVERT,
         };
     private:
         const InstructionType type;
@@ -337,6 +341,40 @@ namespace microjit {
         explicit ScopeCreateInstruction(const Ref<RectifiedScope>& p_scope)
             : Instruction(IT_SCOPE_CREATE), scope(p_scope) {}
     };
+    class ConvertInstruction : public Instruction {
+    public:
+        const Ref<VariableInstruction> from_var;
+        const Ref<VariableInstruction> to_var;
+        const void* converter;
+    private:
+        ConvertInstruction(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to, const void* p_conv)
+            : Instruction(IT_CONVERT), from_var(p_from), to_var(p_to), converter(p_conv) {}
+    public:
+        template<typename From, typename To>
+        static Ref<ConvertInstruction> create(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+            auto converter = ObjectTools::convert<From, To>;
+            auto ins = new ConvertInstruction(p_from, p_to, (const void*)converter);
+            return Ref<ConvertInstruction>::from_uninitialized_object(ins);
+        }
+    };
+    class PrimitiveConvertInstruction : public Instruction {
+    public:
+        const Ref<VariableInstruction> from_var;
+        const Ref<VariableInstruction> to_var;
+        // This will only act as key
+        const void* converter;
+    private:
+        PrimitiveConvertInstruction(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to, const void* p_conv)
+                : Instruction(IT_CONVERT), from_var(p_from), to_var(p_to), converter(p_conv) {}
+    public:
+        template<typename From, typename To>
+        static Ref<PrimitiveConvertInstruction> create(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+            void (*converter)(const From*, To*);
+            PrimitiveConversionHelper::convert(&converter);
+            auto ins = new PrimitiveConvertInstruction(p_from, p_to, (const void*)converter);
+            return Ref<PrimitiveConvertInstruction>::from_uninitialized_object(ins);
+        }
+    };
 
     class RectifiedScope : public ThreadUnsafeObject {
     private:
@@ -447,6 +485,26 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
+        template<typename From, typename To>
+        Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+            if (!has_variable_in_all_scope(p_from) || !has_variable_in_all_scope(p_to)) MJ_RAISE("Does not own target");
+            if (p_from == p_to) MJ_RAISE("Cannot convert a variable to a different type");
+            if (p_from->type.type_index != typeid(From)) MJ_RAISE("Mismatched 'from' type");
+            if (p_to->type.type_index != typeid(To)) MJ_RAISE("Mismatched 'to' type");
+            auto ins = ConvertInstruction::create<From, To>(p_from, p_to);
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
+        template<typename From, typename To>
+        Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+            if (!has_variable_in_all_scope(p_from) || !has_variable_in_all_scope(p_to)) MJ_RAISE("Does not own target");
+            if (p_from == p_to) MJ_RAISE("Cannot convert a variable to a different type");
+            if (p_from->type.type_index != typeid(From)) MJ_RAISE("Mismatched 'from' type");
+            if (p_to->type.type_index != typeid(To)) MJ_RAISE("Mismatched 'to' type");
+            auto ins = PrimitiveConvertInstruction::create<From, To>(p_from, p_to);
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
         template<typename R>
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             // Does not own this variable;
@@ -538,6 +596,14 @@ namespace microjit {
         template<typename T>
         Ref<AssignInstruction> assign_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
             return rectified_scope->assign_from_variable<T>(p_var, p_copy_target);
+        }
+        template<typename From, typename To>
+        Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+            return rectified_scope->convert<From, To>(p_from, p_to);
+        }
+        template<typename From, typename To>
+        Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+            return rectified_scope->primitive_convert<From, To>(p_from, p_to);
         }
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             return rectified_scope->function_return<R>(p_var);

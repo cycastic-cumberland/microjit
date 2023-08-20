@@ -32,7 +32,7 @@ add_library(microjit
         src/microjit/instructions.cpp
         src/microjit/jit.cpp
         src/microjit/primitive_conversion_map.gen.h
-        src/microjit/primitive_converter.gen.h
+        src/microjit/x86_64_primitive_converter.gen.h
 )
 
 set(PYTHON_EXECUTABLE python3)

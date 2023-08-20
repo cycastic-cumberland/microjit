@@ -12,6 +12,7 @@
 
 #include <stack>
 #include "jit.h"
+#include "x86_64_primitive_converter.gen.h"
 
 //#define VERBOSE_ASSEMBLER_LOG
 
@@ -20,7 +21,7 @@
 #define AINL(m_message) std::cout << "[ASM: " << (__LINE__) << "]\t\t" << m_message << "\n"
 #define AIN(m_action) std::cout << "[ASM: " << (__LINE__) << "]\t" << &(#m_action)[11] << "\n"; (m_action)
 #else
-#define AINL(m_message)
+#define AINL(m_message) ((void)0)
 #define AIN(m_action) (m_action)
 #endif
 
@@ -32,7 +33,8 @@ namespace microjit {
             int64_t iterating;
             Box<asmjit::Label> label;
         };
-
+        x86_64PrimitiveConverter converter{};
+    private:
         template<class T>
         static void copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
                                              const microjit::Ref<T> &p_instruction);

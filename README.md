@@ -48,20 +48,20 @@ to dynamically generate codes.
 
 Start by including `microjit/orchestrator.h`
 
-The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and cache `Instance` objects. By default, it is atomically reference-counted, which allows it to be used concurrently and can be cleaned-up automatically, as long as there's no nested reference.
+The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and cache `FunctionInstance` objects. By default, it is atomically reference-counted, which allows it to be used concurrently and can be cleaned-up automatically, as long as there's no nested reference.
 
 All othe major components of MicroJIT are also reference counted (albeit not atomically), so no further memory management is needed.
 
-An `Instance` is a utility class which manage and compile your functions. `Instance` support lazy compilation, the first time it is invoked, it will forward the compilation request to the Orchestrator, which will in turn return the compiled callback, provided by AsmJit. Any subsequence invocation will use the compiled callback.
+A `FunctionInstance` is a utility class which manage and compile your functions. `FunctionInstance` support lazy compilation, the first time it is invoked, it will forward the compilation request to the Orchestrator, which will in turn return the compiled callback, provided by AsmJit. Any subsequence invocation will use the compiled callback.
 
-The Orchestrator actually return an `InstanceWrapper` instead of the `Instance` itself, but you could use it by dereferencing the `InstanceWrapper`.
+The Orchestrator actually return an `InstanceWrapper` instead of the `FunctionInstance` itself, but you could use it by dereferencing the `InstanceWrapper`.
 
 ```c++
 auto re1 = instance(12);  // This will compile the function and call it
 auto re2 = instance(122); // This will call the compiled code immediately
 ```
 
-To edit you function, first call `get_function()` from the `Instance` object.
+To edit you function, first call `get_function()` from the `FunctionInstance` object.
 
 ```c++
 auto function = instance->get_function();
@@ -93,11 +93,12 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 - [x] Construction/Copy construction/Destruction
 - [x] Virtual stack extraction
 - [x] Multiple scopes
+- [x] Type casting
 - [ ] Operations (and overloaded operator call)
 - [ ] Branches (if/else/for/while)
 - [ ] Native function call
 - [ ] JIT compiled function call
-- [ ] Lazy compilation
+- [ ] True lazy compilation
 - [ ] LRU
 - [ ] Documentation
 
@@ -105,7 +106,6 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 
 - [ ] Asynchronous compilation
 - [ ] Optimization
-- [ ] Automatic implicit conversion 
 - [ ] x86 support
 - TBA...
 

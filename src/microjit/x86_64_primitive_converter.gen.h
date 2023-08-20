@@ -10,7 +10,11 @@
 namespace microjit {
     class x86_64PrimitiveConverter {
     private:
-        typedef MicroJITCompiler::Assembly Assembly;
+        struct VoidHasher {
+            size_t _ALWAYS_INLINE_ operator()(const void* p_ptr) const {
+                return (size_t)p_ptr;
+            }
+        };
         typedef Box<asmjit::x86::Assembler> Assembler;
 
         typedef void (*conversion_handler)(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset);
@@ -25,7 +29,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::bx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::bx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
         }
@@ -38,7 +43,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -51,7 +57,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -64,6 +71,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -77,7 +85,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::bx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::bx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
         }
@@ -90,7 +99,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -103,7 +113,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -114,11 +125,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            void (*f)(const uint8_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::ecx, asmjit::x86::al);
+            p_assembler->cvtsi2ss(asmjit::x86::xmm1, asmjit::x86::ecx);
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint8_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -128,11 +138,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            void (*f)(const uint8_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::rcx, asmjit::x86::al);
+            p_assembler->cvtsi2sd(asmjit::x86::xmm1, asmjit::x86::rcx);
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint16_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -144,6 +153,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -157,7 +167,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -170,7 +181,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -183,6 +195,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -196,6 +209,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -209,7 +223,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -222,7 +237,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -233,11 +249,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            void (*f)(const uint16_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::ecx, asmjit::x86::ax);
+            p_assembler->cvtsi2ss(asmjit::x86::xmm1, asmjit::x86::ecx);
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint16_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -247,11 +262,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            void (*f)(const uint16_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::rcx, asmjit::x86::ax);
+            p_assembler->cvtsi2sd(asmjit::x86::xmm1, asmjit::x86::rcx);
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint32_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -263,6 +277,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -276,6 +291,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -289,7 +305,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::eax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -302,6 +319,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -315,6 +333,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -328,6 +347,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::ebx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
@@ -341,7 +361,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::eax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -352,11 +373,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            void (*f)(const uint32_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->mov(asmjit::x86::ecx, asmjit::x86::eax);
+            p_assembler->cvtsi2ss(asmjit::x86::xmm1, asmjit::x86::ecx);
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint32_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -366,11 +386,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            void (*f)(const uint32_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::rcx, asmjit::x86::eax);
+            p_assembler->cvtsi2sd(asmjit::x86::xmm1, asmjit::x86::rcx);
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint64_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -382,6 +401,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -395,6 +415,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -408,6 +429,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::ebx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
@@ -421,6 +443,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -434,6 +457,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -447,6 +471,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::ebx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
@@ -460,6 +485,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::rbx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
@@ -471,11 +497,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
-            void (*f)(const uint64_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->mov(asmjit::x86::ecx, asmjit::x86::rax);
+            p_assembler->cvtsi2ss(asmjit::x86::xmm1, asmjit::x86::ecx);
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_uint64_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -485,11 +510,10 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
-            void (*f)(const uint64_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->mov(asmjit::x86::rcx, asmjit::x86::rax);
+            p_assembler->cvtsi2sd(asmjit::x86::xmm1, asmjit::x86::rcx);
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
         static void convert_int8_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -501,6 +525,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -514,7 +539,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::bx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::bx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
         }
@@ -527,7 +553,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -540,7 +567,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -553,7 +581,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::bx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::bx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
         }
@@ -566,7 +595,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -579,7 +609,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::al);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::al);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -590,11 +621,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            void (*f)(const int8_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::ecx, asmjit::x86::al);
+            p_assembler->fild(asmjit::x86::byte_ptr(asmjit::x86::rdi));
+            p_assembler->movss(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::byte_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int8_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -604,11 +636,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::al, asmjit::x86::byte_ptr(asmjit::x86::rdi));
-            void (*f)(const int8_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::rcx, asmjit::x86::al);
+            p_assembler->fild(asmjit::x86::byte_ptr(asmjit::x86::rdi));
+            p_assembler->movsd(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::byte_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int16_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -620,6 +653,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -633,6 +667,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -646,7 +681,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -659,7 +695,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -672,6 +709,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -685,7 +723,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::ebx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::ebx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
         }
@@ -698,7 +737,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::ax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::ax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -709,11 +749,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            void (*f)(const int16_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::ecx, asmjit::x86::ax);
+            p_assembler->fild(asmjit::x86::word_ptr(asmjit::x86::rdi));
+            p_assembler->movss(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::word_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int16_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -723,11 +764,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::ax, asmjit::x86::word_ptr(asmjit::x86::rdi));
-            void (*f)(const int16_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::rcx, asmjit::x86::ax);
+            p_assembler->fild(asmjit::x86::word_ptr(asmjit::x86::rdi));
+            p_assembler->movsd(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::word_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int32_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -739,6 +781,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -752,6 +795,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -765,6 +809,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::ebx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
@@ -778,7 +823,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::eax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -791,6 +837,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -804,6 +851,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -817,7 +865,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            p_assembler->mov(asmjit::x86::rbx, asmjit::x86::eax);
+
+            p_assembler->movzx(asmjit::x86::rbx, asmjit::x86::eax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
         }
@@ -828,11 +877,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            void (*f)(const int32_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->mov(asmjit::x86::ecx, asmjit::x86::eax);
+            p_assembler->fild(asmjit::x86::dword_ptr(asmjit::x86::rdi));
+            p_assembler->movss(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::dword_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int32_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -842,11 +892,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::eax, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            void (*f)(const int32_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->movzx(asmjit::x86::rcx, asmjit::x86::eax);
+            p_assembler->fild(asmjit::x86::dword_ptr(asmjit::x86::rdi));
+            p_assembler->movsd(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::dword_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int64_t_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -858,6 +909,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -871,6 +923,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -884,6 +937,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::ebx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
@@ -897,6 +951,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::rbx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::rbx);
 
@@ -910,6 +965,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bl, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsi), asmjit::x86::bl);
 
@@ -923,6 +979,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::bx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsi), asmjit::x86::bx);
 
@@ -936,6 +993,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
             //Move from value into a register
             p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->mov(asmjit::x86::ebx, asmjit::x86::rax);
             p_assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::ebx);
 
@@ -947,11 +1005,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
-            void (*f)(const int64_t*, float*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->mov(asmjit::x86::ecx, asmjit::x86::rax);
+            p_assembler->fild(asmjit::x86::qword_ptr(asmjit::x86::rdi));
+            p_assembler->movss(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::qword_ptr(asmjit::x86::rsp));
 
         }
         static void convert_int64_t_to_double(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -961,11 +1020,12 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->mov(asmjit::x86::rax, asmjit::x86::qword_ptr(asmjit::x86::rdi));
-            void (*f)(const int64_t*, double*);
-            f = PrimitiveConversionHelper::conversion_candidate;
-            p_assembler->call(f);
+
+            p_assembler->mov(asmjit::x86::rcx, asmjit::x86::rax);
+            p_assembler->fild(asmjit::x86::qword_ptr(asmjit::x86::rdi));
+            p_assembler->movsd(asmjit::x86::xmm1, asmjit::x86::qword_ptr(asmjit::x86::rsp));
+            p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
+            p_assembler->fstp(asmjit::x86::qword_ptr(asmjit::x86::rsp));
 
         }
         static void convert_float_to_uint8_t(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset) {
@@ -975,8 +1035,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -988,8 +1047,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1001,8 +1059,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1014,8 +1071,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1027,8 +1083,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, int8_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1040,8 +1095,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, int16_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1053,8 +1107,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, int32_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1066,8 +1119,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
+
             void (*f)(const float*, int64_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1079,10 +1131,8 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movss(asmjit::x86::xmm0, asmjit::x86::dword_ptr(asmjit::x86::rdi));
-            p_assembler->cvtss2sd(asmjit::x86::xmm0, asmjit::x86::xmm0);
-            p_assembler->movsd(asmjit::x86::xmm1, asmjit::x86::xmm0);
+
+            p_assembler->cvtss2sd(asmjit::x86::xmm1, asmjit::x86::xmm0);
             p_assembler->movsd(asmjit::x86::qword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
 
         }
@@ -1093,8 +1143,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1106,8 +1155,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1119,8 +1167,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1132,8 +1179,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1145,8 +1191,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, int8_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1158,8 +1203,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, int16_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1171,8 +1215,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, int32_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1184,8 +1227,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             void (*f)(const double*, int64_t*) = PrimitiveConversionHelper::conversion_candidate;
             p_assembler->call(f);
 
@@ -1197,8 +1239,7 @@ namespace microjit {
             p_assembler->sub(asmjit::x86::rdi, std::abs(p_from_vstack_offset));
             //Load to address into rsi
             p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));
-            //Move from value into a register
-            p_assembler->movsd(asmjit::x86::xmm0, asmjit::x86::qword_ptr(asmjit::x86::rdi));
+
             p_assembler->cvtsd2ss(asmjit::x86::xmm0, asmjit::x86::xmm0);
             p_assembler->movss(asmjit::x86::xmm1, asmjit::x86::xmm0);
             p_assembler->movss(asmjit::x86::dword_ptr(asmjit::x86::rsi), asmjit::x86::xmm1);
@@ -1297,7 +1338,107 @@ namespace microjit {
         static conversion_handler get_converter(void (*)(const double*, int64_t*)) { return convert_double_to_int64_t; }
         static conversion_handler get_converter(void (*)(const double*, float*)) { return convert_double_to_float; }
 
+
+
+        std::unordered_map<const void*, conversion_handler, VoidHasher> handler_map{};
+        void setup() {
+            { void (*f)(const uint8_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint8_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint16_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint32_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const uint64_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int8_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int16_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int32_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const int64_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const float*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { void (*f)(const double*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+
+        }
     public:
+        x86_64PrimitiveConverter() { setup(); }
+        
+        conversion_handler get_handler(const void* p_key) const { return handler_map.at(p_key); }
+        
         template <typename From, typename To>
         static conversion_handler get_converter() {
             static constexpr void (*f)(const From*, To*) = nullptr;

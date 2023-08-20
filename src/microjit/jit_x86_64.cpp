@@ -21,9 +21,10 @@ static constexpr auto esi = asmjit::x86::esi;
 
 static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
+#define LOAD_VRBP_LOC (-(ptrs * 4))
 #define STORE_VRBP asmjit::x86::qword_ptr(rbp, -(ptrs * 2))
 #define STORE_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 3))
-#define LOAD_VRBP asmjit::x86::qword_ptr(rbp, -(ptrs * 4))
+#define LOAD_VRBP asmjit::x86::qword_ptr(rbp, LOAD_VRBP_LOC)
 #define LOAD_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 5))
 #define RESIZE_VSTACK(m_amount)                         \
     AIN(assembler->mov(rbx, LOAD_VRSP));                \
@@ -221,6 +222,25 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                             ScopeInfo{current_instruction.c_style_cast<ScopeCreateInstruction>()->scope,
                                       -1, Box<asmjit::Label>()});
                     loop_break = true;
+                    break;
+                }
+                case Instruction::IT_CONVERT: {
+                    auto as_convert = current_instruction.c_style_cast<ConvertInstruction>();
+                    auto from_offset = offset_map.at(as_convert->from_var);
+                    auto to_offset = offset_map.at(as_convert->to_var);
+                    AIN(assembler->mov(rdi, LOAD_VRBP));
+                    AIN(assembler->mov(rsi, rdi));
+                    AIN(assembler->sub(rdi, std::abs(from_offset)));
+                    AIN(assembler->sub(rsi, std::abs(to_offset)));
+                    AIN(assembler->call(as_convert->converter));
+                    break;
+                }
+                case Instruction::IT_PRIMITIVE_CONVERT: {
+                    auto as_convert = current_instruction.c_style_cast<PrimitiveConvertInstruction>();
+                    auto from_offset = offset_map.at(as_convert->from_var);
+                    auto to_offset = offset_map.at(as_convert->to_var);
+                    auto converter_cb = converter.get_handler(as_convert->converter);
+                    converter_cb(assembler, LOAD_VRBP_LOC, from_offset, to_offset);
                     break;
                 }
                 case Instruction::IT_NONE:

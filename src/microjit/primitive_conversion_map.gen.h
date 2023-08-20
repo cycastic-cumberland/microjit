@@ -86,7 +86,7 @@ namespace microjit {
         static void conversion_candidate(const int64_t* p_from, int32_t* p_to) { *p_to = int32_t(*p_from); }
         static void conversion_candidate(const int64_t* p_from, float* p_to) { *p_to = float(*p_from); }
         static void conversion_candidate(const int64_t* p_from, double* p_to) { *p_to = double(*p_from); }
-        static void conversion_candidate(const float* p_from, uint8_t* p_to) { *p_to = uint8_t(*p_from); }
+        static void conversion_candidate(const float* p_from, uint8_t* p_to) { auto buffer = uint8_t(*p_from); *p_to = buffer; }
         static void conversion_candidate(const float* p_from, uint16_t* p_to) { *p_to = uint16_t(*p_from); }
         static void conversion_candidate(const float* p_from, uint32_t* p_to) { *p_to = uint32_t(*p_from); }
         static void conversion_candidate(const float* p_from, uint64_t* p_to) { *p_to = uint64_t(*p_from); }

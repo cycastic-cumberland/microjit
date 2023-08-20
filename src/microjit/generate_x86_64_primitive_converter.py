@@ -28,7 +28,11 @@ TEMPLATE_TEXT = '''
 namespace microjit {{
     class x86_64PrimitiveConverter {{
     private:
-        typedef MicroJITCompiler::Assembly Assembly;
+        struct VoidHasher {{
+            size_t _ALWAYS_INLINE_ operator()(const void* p_ptr) const {{
+                return (size_t)p_ptr;
+            }}
+        }};
         typedef Box<asmjit::x86::Assembler> Assembler;
 
         typedef void (*conversion_handler)(Assembler& p_assembler, const int64_t& p_vstack_loc, const int64_t& p_from_vstack_offset, const int64_t& p_to_vstack_offset);
@@ -37,7 +41,17 @@ namespace microjit {{
 {}
         // Converter getters
 {}
+
+
+        std::unordered_map<const void*, conversion_handler, VoidHasher> handler_map{{}};
+        void setup() {{
+{}
+        }}
     public:
+        x86_64PrimitiveConverter() {{ setup(); }}
+        
+        conversion_handler get_handler(const void* p_key) const {{ return handler_map.at(p_key); }}
+        
         template <typename From, typename To>
         static conversion_handler get_converter() {{
             static constexpr void (*f)(const From*, To*) = nullptr;
@@ -124,38 +138,66 @@ def handle_convert(from_type: tuple[int, int], to_type: tuple[int, int]):
     re += (" " * INDENT * scope) + "//Load to address into rsi\n"
     re += (" " * INDENT * scope) + f"p_assembler->sub(asmjit::x86::rsi, std::abs(p_to_vstack_offset));\n"
     f_ptr_type = get_ptr(f_size)
-    re += (" " * INDENT * scope) + "//Move from value into a register\n"
-    if f_type == 0 or f_type == 1:
-        re += (" " * INDENT * scope) + f"p_assembler->mov({from_reg}, {f_ptr_type}(asmjit::x86::rdi));\n"
-    else:
-        if f_size == 32:
-            re += (" " * INDENT * scope) + f"p_assembler->movss({from_reg}, {f_ptr_type}(asmjit::x86::rdi));\n"
+    if ((f_type == 0 or f_type == 1) and (t_type == 0 or t_type == 1)) or (f_type == 1 and t_type == 1):
+        re += (" " * INDENT * scope) + "//Move from value into a register\n"
+        if f_type == 0 or f_type == 1:
+            re += (" " * INDENT * scope) + f"p_assembler->mov({from_reg}, {f_ptr_type}(asmjit::x86::rdi));\n"
         else:
-            re += (" " * INDENT * scope) + f"p_assembler->movsd({from_reg}, {f_ptr_type}(asmjit::x86::rdi));\n"
+            if f_size == 32:
+                re += (" " * INDENT * scope) + f"p_assembler->movss({from_reg}, {f_ptr_type}(asmjit::x86::rdi));\n"
+            else:
+                re += (" " * INDENT * scope) + f"p_assembler->movsd({from_reg}, {f_ptr_type}(asmjit::x86::rdi));\n"
 
-
+    re += "\n"
     t_ptr_type = get_ptr(t_size)
     # Buffer space, with type of from and size of to
     buffer_reg = select_register(f_type, t_size, 2)
     # If from is integer
     if f_type == 0 or f_type == 1:
         if t_type == 0 or t_type == 1:
-            re += (" " * INDENT * scope) + f"p_assembler->mov({to_reg}, {from_reg});\n"
+            if f_size < t_size:
+                # Move with zero extension
+                re += (" " * INDENT * scope) + f"p_assembler->movzx({to_reg}, {from_reg});\n"
+            else:
+                re += (" " * INDENT * scope) + f"p_assembler->mov({to_reg}, {from_reg});\n"
             re += (" " * INDENT * scope) + f"p_assembler->mov({t_ptr_type}(asmjit::x86::rsi), {to_reg});\n"
-        # This is currently too much for me to handle
+        # integer to floating point
         else:
-            from_name = get_type_name(from_type)
-            to_name = get_type_name(to_type)
-            re += (" " * INDENT * scope) + f"void (*f)(const {from_name}*, {to_name}*);\n"
-            re += (" " * INDENT * scope) + f"f = PrimitiveConversionHelper::conversion_candidate;\n"
-            re += (" " * INDENT * scope) + f"p_assembler->call(f);\n"
+            if f_size < t_size:
+                # Move with zero extension
+                re += (" " * INDENT * scope) + f"p_assembler->movzx({buffer_reg}, {from_reg});\n"
+            else:
+                re += (" " * INDENT * scope) + f"p_assembler->mov({buffer_reg}, {from_reg});\n"
+            # If from is unsigned, no further processing is needed
+            if f_type == 0:
+                if t_size == 32:
+                    re += (" " * INDENT * scope) + f"p_assembler->cvtsi2ss({to_reg}, {buffer_reg});\n"
+                    re += (" " * INDENT * scope) + f"p_assembler->movss({t_ptr_type}(asmjit::x86::rsi), {to_reg});\n"
+                else:
+                    re += (" " * INDENT * scope) + f"p_assembler->cvtsi2sd({to_reg}, {buffer_reg});\n"
+                    re += (" " * INDENT * scope) + f"p_assembler->movsd({t_ptr_type}(asmjit::x86::rsi), {to_reg});\n"
+            # If is signed, take account for negative number
+            else:
+                # Use FILD instruction
+                re += (" " * INDENT * scope) + f"p_assembler->fild({f_ptr_type}(asmjit::x86::rdi));\n"
+                if t_size == 32:
+                    re += (" " * INDENT * scope) + f"p_assembler->movss({to_reg}, asmjit::x86::qword_ptr(asmjit::x86::rsp));\n"
+                    re += (" " * INDENT * scope) + f"p_assembler->movss({t_ptr_type}(asmjit::x86::rsi), {to_reg});\n"
+                else:
+                    re += (" " * INDENT * scope) + f"p_assembler->movsd({to_reg}, asmjit::x86::qword_ptr(asmjit::x86::rsp));\n"
+                    re += (" " * INDENT * scope) + f"p_assembler->movsd({t_ptr_type}(asmjit::x86::rsi), {to_reg});\n"
+                re += (" " * INDENT * scope) + f"p_assembler->fstp({f_ptr_type}(asmjit::x86::rsp));\n"
+            # from_name = get_type_name(from_type)
+            # to_name = get_type_name(to_type)
+            # re += (" " * INDENT * scope) + f"void (*f)(const {from_name}*, {to_name}*) = PrimitiveConversionHelper::conversion_candidate;\n"
+            # re += (" " * INDENT * scope) + f"p_assembler->call(f);\n"
     # If from is floating point
     else:
         if t_type == 2:
             # Convert from float to double
             if t_size > f_size:
-                re += (" " * INDENT * scope) + f"p_assembler->cvtss2sd({from_reg}, {from_reg});\n"
-                re += (" " * INDENT * scope) + f"p_assembler->movsd({to_reg}, {from_reg});\n"
+                re += (" " * INDENT * scope) + f"p_assembler->cvtss2sd({to_reg}, {from_reg});\n"
+                # re += (" " * INDENT * scope) + f"p_assembler->movsd({to_reg}, {from_reg});\n"
                 re += (" " * INDENT * scope) + f"p_assembler->movsd({t_ptr_type}(asmjit::x86::rsi), {to_reg});\n"
             # Convert from double to float
             else:
@@ -194,7 +236,20 @@ def populate_getters() -> str:
             re += (" " * INDENT * scope) + generate_getter(PRIMITIVE_LIST[i], PRIMITIVE_LIST[j]) + "\n"
     return re
 
-TARGET_FILE = "primitive_converter.gen.h"
+def populate_handler_map() -> str:
+    n = len(PRIMITIVE_LIST)
+    re = ""
+    scope = 3
+    for i in range(n):
+        for j in range(n):
+            if i == j: continue
+            (f_name, t_name) = (get_type_name(PRIMITIVE_LIST[i]), get_type_name(PRIMITIVE_LIST[j]))
+            re += ((" " * INDENT * scope) + "{ " + f"void (*f)(const {f_name}*, {t_name}*) = nullptr; "
+                   "f = PrimitiveConversionHelper::conversion_candidate; " 
+                   "handler_map[(const void*)f] = get_converter(f);" + " }" + "\n")
+    return re
+
+TARGET_FILE = "x86_64_primitive_converter.gen.h"
 
 import sys
 import os
@@ -204,4 +259,4 @@ import os
 full_target_path = os.path.join(dirname, TARGET_FILE)
 
 with open(full_target_path, "wt") as f:
-    f.write(TEMPLATE_TEXT.format(populate_converters(), populate_getters()))
+    f.write(TEMPLATE_TEXT.format(populate_converters(), populate_getters(), populate_handler_map()))

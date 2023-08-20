@@ -40,11 +40,13 @@ namespace microjit {
 
         public:
             explicit FunctionInstance(const OrchestratorComponent* p_orchestrator);
+            ~FunctionInstance() override = default;
+
             Ref<Function<R, Args...>> get_function() const { return function; }
             R call(Args&&... args) const;
             R call_with_vstack(VirtualStack* p_stack, Args&&... args) const;
             void recompile() const;
-            ~FunctionInstance() override = default;
+            void detach();
             std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
                 compile_internal(&compiled_function);
                 return compiled_function;
@@ -73,6 +75,7 @@ namespace microjit {
             _NO_DISCARD_ FunctionInstance<R, Args...>* operator*() { return ptr(); }
             _NO_DISCARD_ const FunctionInstance<R, Args...>* operator*() const { return ptr(); }
             void recompile() const { instance->recompile(); }
+            void detach() { instance->detach(); }
             std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
                 return instance->get_full_compiled_function();
             }
@@ -97,6 +100,8 @@ namespace microjit {
             explicit InstanceHub(OrchestratorComponent* p_orchestrator) : parent(p_orchestrator) {}
             _NO_DISCARD_ VirtualStackFunction fetch_function(const Ref<RectifiedFunction> &p_func) const;
             _NO_DISCARD_ const VirtualStackSettings& get_settings() const;
+            template<typename R, typename ...Args>
+            void detach_instance(const FunctionInstance<R, Args...>* p_instance, const void* p_func) const;
         };
     private:
         friend struct InstanceHub;
@@ -136,6 +141,22 @@ namespace microjit {
             instance_map[(size_t)(instance.ptr())] = instance.template c_style_cast<RefCounter>();
             return InstanceWrapper<R, Args...>(instance);
         }
+        void rectified_detach_instance(const void* p_instance, const void* p_func){
+#ifdef DEBUG_ENABLED
+            if (instance_map.find((size_t)p_instance) == instance_map.end())
+                std::cerr << "Instance " << (size_t)p_instance << " not found\n";
+            else instance_map.erase((size_t)p_instance);
+            if (function_map.find((size_t)p_func) == function_map.end())
+                std::cerr << "Function " << (size_t)p_func << " not found\n";
+            else function_map.erase((size_t)p_func);
+#else
+            instance_map.erase((size_t)p_instance);
+#endif
+        }
+        template<typename R, typename ...Args>
+        void detach_instance(const FunctionInstance<R, Args...>* p_instance, const void* p_func){
+            rectified_detach_instance(p_instance, p_func);
+        }
     public:
         OrchestratorComponent()
             : hub(this) {
@@ -152,6 +173,22 @@ namespace microjit {
         }
         _NO_DISCARD_ VirtualStackSettings& edit_vstack_settings() { return settings; }
     };
+
+    template<class CompilerTy, class RefCounter>
+    template<typename R, typename... Args>
+    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::detach() {
+        static const auto hub_offset = ((size_t)(&(((Host*)0)->hub)));
+        const auto& instance_hub = *(InstanceHub*)(&((uint8_t *)parent)[hub_offset]);
+        instance_hub.detach_instance(this, function.ptr());
+        parent = nullptr;
+    }
+
+    template<class CompilerTy, class RefCounter>
+    template<typename R, typename... Args>
+    void OrchestratorComponent<CompilerTy, RefCounter>::InstanceHub::detach_instance(
+            const OrchestratorComponent::FunctionInstance<R, Args...> *p_instance, const void *p_func) const {
+        parent->detach_instance(p_instance, p_func);
+    }
 
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>

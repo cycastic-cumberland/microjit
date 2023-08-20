@@ -96,22 +96,20 @@ namespace microjit {
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_valid() const { return reference != nullptr; }
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_null() const { return reference == nullptr; }
 
-        Ref() {
-            reference = nullptr;
-        }
+        Ref() = default;
 
         ~Ref() {
             unref();
         }
 
-        static Ref<T> from_initialized_object(T* p_ptr){
+        static _ALWAYS_INLINE_ Ref<T> from_initialized_object(T* p_ptr){
             Ref<T> re{};
             if (!p_ptr) return re;
             if (!p_ptr->ref()) return re;
             re.reference = p_ptr;
             return re;
         }
-        static Ref<T> from_uninitialized_object(T* p_ptr){
+        static _ALWAYS_INLINE_ Ref<T> from_uninitialized_object(T* p_ptr){
             Ref<T> re{};
             if (!p_ptr) return re;
             p_ptr->init_ref();
