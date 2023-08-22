@@ -12,11 +12,11 @@ def generate_unique_pairs(strings):
 
 def generate_function(pair):
     (f, t) = pair
-    if f == "float" and t == "uint8_t":
-        # This one need special care for some reason...
-        return f"static void conversion_candidate(const {f}* p_from, {t}* p_to) {{ auto buffer = {t}(*p_from); *p_to = buffer; }}"
+    # if f == "float" and t == "uint8_t":
+    #     # This one need special care for some reason...
+    #     return f"static void conversion_candidate(const {f}* p_from, {t}* p_to) {{ auto buffer = {t}(*p_from); *p_to = buffer; }}"
 
-    return f"static void conversion_candidate(const {f}* p_from, {t}* p_to) {{ *p_to = {t}(*p_from); }}"
+    return f"static void conversion_candidate(const {f}* p_from, {t}* p_to) {{ *p_to = *p_from; }}"
 
 def generate_all_functions(list):
     re = ""

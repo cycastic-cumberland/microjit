@@ -53,8 +53,8 @@ namespace microjit {{
         conversion_handler get_handler(const void* p_key) const {{ return handler_map.at(p_key); }}
         
         template <typename From, typename To>
-        static conversion_handler get_converter() {{
-            static constexpr void (*f)(const From*, To*) = nullptr;
+        static constexpr conversion_handler get_converter() {{
+            constexpr void (*f)(const From*, To*) = nullptr;
             return get_converter(f);
         }}
     }};
@@ -79,7 +79,7 @@ def get_type_name(raw: tuple[int, int]) -> str:
 
 def generate_getter(from_: tuple[int, int], to_: tuple[int, int]):
     (f_name, t_name) = (get_type_name(from_), get_type_name(to_))
-    return f"static conversion_handler get_converter(void (*)(const {f_name}*, {t_name}*)) {{ return {CONVERSION_HANDLER_NAME.format(f_name, t_name)}; }}"
+    return f"static constexpr conversion_handler get_converter(void (*)(const {f_name}*, {t_name}*)) {{ return {CONVERSION_HANDLER_NAME.format(f_name, t_name)}; }}"
 
 def select_register(type: int, size: int, dis: int):
     reg = ""
@@ -244,8 +244,8 @@ def populate_handler_map() -> str:
         for j in range(n):
             if i == j: continue
             (f_name, t_name) = (get_type_name(PRIMITIVE_LIST[i]), get_type_name(PRIMITIVE_LIST[j]))
-            re += ((" " * INDENT * scope) + "{ " + f"void (*f)(const {f_name}*, {t_name}*) = nullptr; "
-                   "f = PrimitiveConversionHelper::conversion_candidate; " 
+            re += ((" " * INDENT * scope) + "{ " + f"static constexpr void (*f)(const {f_name}*, {t_name}*) = "
+                   "PrimitiveConversionHelper::conversion_candidate; " 
                    "handler_map[(const void*)f] = get_converter(f);" + " }" + "\n")
     return re
 

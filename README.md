@@ -94,11 +94,12 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 - [x] Virtual stack extraction
 - [x] Multiple scopes
 - [x] Type casting
+- [ ] (Primitive) Type casting
 - [ ] Operations (and overloaded operator call)
 - [ ] Branches (if/else/for/while)
 - [ ] Native function call
 - [ ] JIT compiled function call
-- [ ] True lazy compilation
+- [x] Lazy compilation for JIT compiled function call
 - [ ] LRU
 - [ ] Documentation
 

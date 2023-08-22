@@ -96,7 +96,7 @@ namespace microjit {
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_valid() const { return reference != nullptr; }
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_null() const { return reference == nullptr; }
 
-        Ref() = default;
+        constexpr Ref() = default;
 
         ~Ref() {
             unref();
@@ -120,7 +120,7 @@ namespace microjit {
         static _ALWAYS_INLINE_ Ref<T> make_ref(Args&&... args){
             return from_uninitialized_object(new T(args...));
         }
-        static _ALWAYS_INLINE_ Ref<T> null() { return Ref<T>(); }
+        static _ALWAYS_INLINE_ constexpr Ref<T> null() { return Ref<T>(); }
 
         template <class To>
         _ALWAYS_INLINE_ Ref<To> safe_cast() const {

@@ -33,6 +33,13 @@ add_library(microjit
         src/microjit/jit.cpp
         src/microjit/primitive_conversion_map.gen.h
         src/microjit/x86_64_primitive_converter.gen.h
+        src/microjit/thread_pool.h
+        src/microjit/priority_queue.h
+        src/microjit/managed_thread.h
+        src/microjit/managed_thread.cpp
+        src/microjit/compilation_agent.h
+        src/microjit/command_queue.h
+        src/microjit/compilation_agent.cpp
 )
 
 set(PYTHON_EXECUTABLE python3)

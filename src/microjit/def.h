@@ -19,4 +19,26 @@
 #define _NO_DISCARD_ [[nodiscard]]
 #endif
 
+#if !defined(likely) && !defined(unlikely)
+#ifdef __GNUC__
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+#define likely(x) x
+#define unlikely(x) x
+#endif
+#endif
+
+#ifndef SWAP
+template <typename T>
+void __swap(T& p_left, T& p_right){
+    auto aux = p_left;
+    p_left = p_right;
+    p_right = aux;
+}
+
+#define SWAP(m_a, m_b) __swap((m_a), (m_b))
+
+#endif
+
 #endif //MICROJIT_DEF_H

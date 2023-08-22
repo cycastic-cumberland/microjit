@@ -33,7 +33,7 @@ namespace microjit {
             int64_t iterating;
             Box<asmjit::Label> label;
         };
-        x86_64PrimitiveConverter converter{};
+        const x86_64PrimitiveConverter converter{};
     private:
         template<class T>
         static void copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
@@ -54,7 +54,7 @@ namespace microjit {
                                               std::stack<ScopeInfo>& p_scope_stack);
 
     protected:
-        CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) override;
+        CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const override;
     public:
         explicit MicroJITCompiler_x86_64(const Ref<MicroJITRuntime>& p_runtime) : MicroJITCompiler(p_runtime) {}
     };

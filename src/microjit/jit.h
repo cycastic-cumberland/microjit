@@ -6,14 +6,18 @@
 #define MICROJIT_JIT_CORE_H
 
 #include <asmjit/asmjit.h>
+#include <mutex>
+#include <csignal>
 #include "instructions.h"
 
 namespace microjit {
     class MicroJITRuntime : public ThreadUnsafeObject {
     private:
         asmjit::JitRuntime runtime{};
+        std::mutex binary_mutex{};
     public:
         asmjit::JitRuntime& get_asmjit_runtime() { return runtime; }
+        std::mutex& get_mutex() { return binary_mutex; }
     };
     class MicroJITCompiler : public ThreadUnsafeObject {
     public:
@@ -44,16 +48,14 @@ namespace microjit {
             std::unordered_map<Ref<VariableInstruction>, int64_t, InstructionHasher<VariableInstruction>> variable_map{};
         };
     protected:
-        Ref<MicroJITRuntime> runtime;
-        virtual CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) { return {}; }
+        mutable Ref<MicroJITRuntime> runtime;
+        virtual CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const { return {}; }
         static Ref<StackFrameInfo> create_frame_report(const Ref<RectifiedFunction>& p_func);
     public:
         static void raise_stack_overflown(){
             static constexpr char message[36] = "MicroJIT instance: Stack overflown\n";
-            static constexpr int* the_funny = nullptr;
             fprintf(stderr, message);
-            int a = *the_funny;
-            fprintf(stdout, "Well what now...");
+            raise(SIGABRT);
         }
 
         explicit MicroJITCompiler(const Ref<MicroJITRuntime>& p_runtime) : runtime(p_runtime) {}

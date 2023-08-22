@@ -6,6 +6,8 @@
 #include "jit_x86_64.h"
 #include "virtual_stack.h"
 
+// I've yet to test this, but this probably won't work with stdcall
+
 static constexpr auto rbp = asmjit::x86::rbp;
 static constexpr auto rsp = asmjit::x86::rsp;
 static constexpr auto rdi = asmjit::x86::rdi;
@@ -59,8 +61,12 @@ static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
 
 microjit::MicroJITCompiler::CompilationResult
-microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    auto assembly = Ref<Assembly>::make_ref(runtime->get_asmjit_runtime());
+microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) const {
+    Ref<Assembly> assembly{};
+    {
+        std::lock_guard<std::mutex> guard(runtime->get_mutex());
+        assembly = Ref<Assembly>::make_ref(runtime->get_asmjit_runtime());
+    }
     auto& assembler = assembly->assembler;
     AINL("Prologue");
     AIN(assembler->push(rbp));
@@ -255,8 +261,10 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     AIN(assembler->leave());
     AIN(assembler->ret());
 
-    runtime->get_asmjit_runtime().add(&assembly->callback, &assembly->code);
-
+    {
+        std::lock_guard<std::mutex> guard(runtime->get_mutex());
+        runtime->get_asmjit_runtime().add(&assembly->callback, &assembly->code);
+    }
     return { 0, assembly };
 }
 void microjit::MicroJITCompiler_x86_64::copy_variable(microjit::Box<asmjit::x86::Assembler> &assembler,

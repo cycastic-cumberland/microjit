@@ -1247,191 +1247,191 @@ namespace microjit {
         }
 
         // Converter getters
-        static conversion_handler get_converter(void (*)(const uint8_t*, uint16_t*)) { return convert_uint8_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, uint32_t*)) { return convert_uint8_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, uint64_t*)) { return convert_uint8_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, int8_t*)) { return convert_uint8_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, int16_t*)) { return convert_uint8_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, int32_t*)) { return convert_uint8_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, int64_t*)) { return convert_uint8_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, float*)) { return convert_uint8_t_to_float; }
-        static conversion_handler get_converter(void (*)(const uint8_t*, double*)) { return convert_uint8_t_to_double; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, uint8_t*)) { return convert_uint16_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, uint32_t*)) { return convert_uint16_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, uint64_t*)) { return convert_uint16_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, int8_t*)) { return convert_uint16_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, int16_t*)) { return convert_uint16_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, int32_t*)) { return convert_uint16_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, int64_t*)) { return convert_uint16_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, float*)) { return convert_uint16_t_to_float; }
-        static conversion_handler get_converter(void (*)(const uint16_t*, double*)) { return convert_uint16_t_to_double; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, uint8_t*)) { return convert_uint32_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, uint16_t*)) { return convert_uint32_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, uint64_t*)) { return convert_uint32_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, int8_t*)) { return convert_uint32_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, int16_t*)) { return convert_uint32_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, int32_t*)) { return convert_uint32_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, int64_t*)) { return convert_uint32_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, float*)) { return convert_uint32_t_to_float; }
-        static conversion_handler get_converter(void (*)(const uint32_t*, double*)) { return convert_uint32_t_to_double; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, uint8_t*)) { return convert_uint64_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, uint16_t*)) { return convert_uint64_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, uint32_t*)) { return convert_uint64_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, int8_t*)) { return convert_uint64_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, int16_t*)) { return convert_uint64_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, int32_t*)) { return convert_uint64_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, int64_t*)) { return convert_uint64_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, float*)) { return convert_uint64_t_to_float; }
-        static conversion_handler get_converter(void (*)(const uint64_t*, double*)) { return convert_uint64_t_to_double; }
-        static conversion_handler get_converter(void (*)(const int8_t*, uint8_t*)) { return convert_int8_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, uint16_t*)) { return convert_int8_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, uint32_t*)) { return convert_int8_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, uint64_t*)) { return convert_int8_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, int16_t*)) { return convert_int8_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, int32_t*)) { return convert_int8_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, int64_t*)) { return convert_int8_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const int8_t*, float*)) { return convert_int8_t_to_float; }
-        static conversion_handler get_converter(void (*)(const int8_t*, double*)) { return convert_int8_t_to_double; }
-        static conversion_handler get_converter(void (*)(const int16_t*, uint8_t*)) { return convert_int16_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, uint16_t*)) { return convert_int16_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, uint32_t*)) { return convert_int16_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, uint64_t*)) { return convert_int16_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, int8_t*)) { return convert_int16_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, int32_t*)) { return convert_int16_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, int64_t*)) { return convert_int16_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const int16_t*, float*)) { return convert_int16_t_to_float; }
-        static conversion_handler get_converter(void (*)(const int16_t*, double*)) { return convert_int16_t_to_double; }
-        static conversion_handler get_converter(void (*)(const int32_t*, uint8_t*)) { return convert_int32_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, uint16_t*)) { return convert_int32_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, uint32_t*)) { return convert_int32_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, uint64_t*)) { return convert_int32_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, int8_t*)) { return convert_int32_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, int16_t*)) { return convert_int32_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, int64_t*)) { return convert_int32_t_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const int32_t*, float*)) { return convert_int32_t_to_float; }
-        static conversion_handler get_converter(void (*)(const int32_t*, double*)) { return convert_int32_t_to_double; }
-        static conversion_handler get_converter(void (*)(const int64_t*, uint8_t*)) { return convert_int64_t_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, uint16_t*)) { return convert_int64_t_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, uint32_t*)) { return convert_int64_t_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, uint64_t*)) { return convert_int64_t_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, int8_t*)) { return convert_int64_t_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, int16_t*)) { return convert_int64_t_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, int32_t*)) { return convert_int64_t_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const int64_t*, float*)) { return convert_int64_t_to_float; }
-        static conversion_handler get_converter(void (*)(const int64_t*, double*)) { return convert_int64_t_to_double; }
-        static conversion_handler get_converter(void (*)(const float*, uint8_t*)) { return convert_float_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const float*, uint16_t*)) { return convert_float_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const float*, uint32_t*)) { return convert_float_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const float*, uint64_t*)) { return convert_float_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const float*, int8_t*)) { return convert_float_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const float*, int16_t*)) { return convert_float_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const float*, int32_t*)) { return convert_float_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const float*, int64_t*)) { return convert_float_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const float*, double*)) { return convert_float_to_double; }
-        static conversion_handler get_converter(void (*)(const double*, uint8_t*)) { return convert_double_to_uint8_t; }
-        static conversion_handler get_converter(void (*)(const double*, uint16_t*)) { return convert_double_to_uint16_t; }
-        static conversion_handler get_converter(void (*)(const double*, uint32_t*)) { return convert_double_to_uint32_t; }
-        static conversion_handler get_converter(void (*)(const double*, uint64_t*)) { return convert_double_to_uint64_t; }
-        static conversion_handler get_converter(void (*)(const double*, int8_t*)) { return convert_double_to_int8_t; }
-        static conversion_handler get_converter(void (*)(const double*, int16_t*)) { return convert_double_to_int16_t; }
-        static conversion_handler get_converter(void (*)(const double*, int32_t*)) { return convert_double_to_int32_t; }
-        static conversion_handler get_converter(void (*)(const double*, int64_t*)) { return convert_double_to_int64_t; }
-        static conversion_handler get_converter(void (*)(const double*, float*)) { return convert_double_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, uint16_t*)) { return convert_uint8_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, uint32_t*)) { return convert_uint8_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, uint64_t*)) { return convert_uint8_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, int8_t*)) { return convert_uint8_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, int16_t*)) { return convert_uint8_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, int32_t*)) { return convert_uint8_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, int64_t*)) { return convert_uint8_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, float*)) { return convert_uint8_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const uint8_t*, double*)) { return convert_uint8_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, uint8_t*)) { return convert_uint16_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, uint32_t*)) { return convert_uint16_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, uint64_t*)) { return convert_uint16_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, int8_t*)) { return convert_uint16_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, int16_t*)) { return convert_uint16_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, int32_t*)) { return convert_uint16_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, int64_t*)) { return convert_uint16_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, float*)) { return convert_uint16_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const uint16_t*, double*)) { return convert_uint16_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, uint8_t*)) { return convert_uint32_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, uint16_t*)) { return convert_uint32_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, uint64_t*)) { return convert_uint32_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, int8_t*)) { return convert_uint32_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, int16_t*)) { return convert_uint32_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, int32_t*)) { return convert_uint32_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, int64_t*)) { return convert_uint32_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, float*)) { return convert_uint32_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const uint32_t*, double*)) { return convert_uint32_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, uint8_t*)) { return convert_uint64_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, uint16_t*)) { return convert_uint64_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, uint32_t*)) { return convert_uint64_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, int8_t*)) { return convert_uint64_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, int16_t*)) { return convert_uint64_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, int32_t*)) { return convert_uint64_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, int64_t*)) { return convert_uint64_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, float*)) { return convert_uint64_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const uint64_t*, double*)) { return convert_uint64_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, uint8_t*)) { return convert_int8_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, uint16_t*)) { return convert_int8_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, uint32_t*)) { return convert_int8_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, uint64_t*)) { return convert_int8_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, int16_t*)) { return convert_int8_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, int32_t*)) { return convert_int8_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, int64_t*)) { return convert_int8_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, float*)) { return convert_int8_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const int8_t*, double*)) { return convert_int8_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, uint8_t*)) { return convert_int16_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, uint16_t*)) { return convert_int16_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, uint32_t*)) { return convert_int16_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, uint64_t*)) { return convert_int16_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, int8_t*)) { return convert_int16_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, int32_t*)) { return convert_int16_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, int64_t*)) { return convert_int16_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, float*)) { return convert_int16_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const int16_t*, double*)) { return convert_int16_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, uint8_t*)) { return convert_int32_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, uint16_t*)) { return convert_int32_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, uint32_t*)) { return convert_int32_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, uint64_t*)) { return convert_int32_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, int8_t*)) { return convert_int32_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, int16_t*)) { return convert_int32_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, int64_t*)) { return convert_int32_t_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, float*)) { return convert_int32_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const int32_t*, double*)) { return convert_int32_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, uint8_t*)) { return convert_int64_t_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, uint16_t*)) { return convert_int64_t_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, uint32_t*)) { return convert_int64_t_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, uint64_t*)) { return convert_int64_t_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, int8_t*)) { return convert_int64_t_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, int16_t*)) { return convert_int64_t_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, int32_t*)) { return convert_int64_t_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, float*)) { return convert_int64_t_to_float; }
+        static constexpr conversion_handler get_converter(void (*)(const int64_t*, double*)) { return convert_int64_t_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, uint8_t*)) { return convert_float_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, uint16_t*)) { return convert_float_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, uint32_t*)) { return convert_float_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, uint64_t*)) { return convert_float_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, int8_t*)) { return convert_float_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, int16_t*)) { return convert_float_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, int32_t*)) { return convert_float_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, int64_t*)) { return convert_float_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const float*, double*)) { return convert_float_to_double; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, uint8_t*)) { return convert_double_to_uint8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, uint16_t*)) { return convert_double_to_uint16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, uint32_t*)) { return convert_double_to_uint32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, uint64_t*)) { return convert_double_to_uint64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, int8_t*)) { return convert_double_to_int8_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, int16_t*)) { return convert_double_to_int16_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, int32_t*)) { return convert_double_to_int32_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, int64_t*)) { return convert_double_to_int64_t; }
+        static constexpr conversion_handler get_converter(void (*)(const double*, float*)) { return convert_double_to_float; }
 
 
 
         std::unordered_map<const void*, conversion_handler, VoidHasher> handler_map{};
         void setup() {
-            { void (*f)(const uint8_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint8_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint16_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint32_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const uint64_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int8_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int16_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int32_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const int64_t*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const float*, double*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, uint8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, uint16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, uint32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, uint64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, int8_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, int16_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, int32_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, int64_t*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
-            { void (*f)(const double*, float*) = nullptr; f = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint8_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint16_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint32_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const uint64_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int8_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int16_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int32_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const int64_t*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const float*, double*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, uint8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, uint16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, uint32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, uint64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, int8_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, int16_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, int32_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, int64_t*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
+            { static constexpr void (*f)(const double*, float*) = PrimitiveConversionHelper::conversion_candidate; handler_map[(const void*)f] = get_converter(f); }
 
         }
     public:
@@ -1440,8 +1440,8 @@ namespace microjit {
         conversion_handler get_handler(const void* p_key) const { return handler_map.at(p_key); }
         
         template <typename From, typename To>
-        static conversion_handler get_converter() {
-            static constexpr void (*f)(const From*, To*) = nullptr;
+        static constexpr conversion_handler get_converter() {
+            constexpr void (*f)(const From*, To*) = nullptr;
             return get_converter(f);
         }
     };
