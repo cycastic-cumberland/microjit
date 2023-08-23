@@ -39,7 +39,7 @@ namespace microjit {
         template<class T>
         static void assign(T* p_obj, const T* copy_target) { *p_obj = *copy_target; }
         template<typename From, typename To>
-        static void convert(const From* p_from, To* p_to){ *p_to = *p_from; }
+        static void convert(const From* p_from, To* p_to){ *p_to = To(*p_from); }
 
         static void empty_ctor(void*) {  }
         static void empty_copy_ctor(void*, void*) {  }
@@ -97,6 +97,7 @@ namespace microjit {
     template <typename R, typename ...Args> class Scope;
 
     class RectifiedScope;
+    class RectifiedFunction;
 
     class Instruction : public ThreadUnsafeObject{
     public:
@@ -110,8 +111,9 @@ namespace microjit {
             IT_SCOPE_CREATE,
             IT_CONVERT,
             IT_PRIMITIVE_CONVERT,
-            IT_CALL_JIT,
-            IT_CALL_NATIVE,
+            IT_INVOKE_JIT,
+            IT_INVOKE_NATIVE,
+            IT_INVOKE_PREPACKED_NATIVE,
         };
     private:
         const InstructionType type;
@@ -375,6 +377,21 @@ namespace microjit {
             return Ref<PrimitiveConvertInstruction>::from_uninitialized_object(ins);
         }
     };
+    class ArgumentsVector : public ThreadUnsafeObject {
+    public:
+        std::vector<Ref<Value>> values{};
+    };
+    class InvokeJitInstruction : public Instruction {
+    public:
+        const Ref<RectifiedFunction> target_function;
+        const Ref<ArgumentsVector> passed_arguments;
+    private:
+        InvokeJitInstruction(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args);
+    public:
+        static Ref<InvokeJitInstruction> create(const Ref<ArgumentsDeclaration>& p_parent_args,
+                                                const Ref<RectifiedFunction>& p_func,
+                                                const Ref<ArgumentsVector>& p_args);
+    };
 
     class RectifiedScope : public ThreadUnsafeObject {
     private:
@@ -507,6 +524,7 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
+        Ref<InvokeJitInstruction> invoke_jit(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args);
         template<typename R>
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             // Does not own this variable;
@@ -604,11 +622,11 @@ namespace microjit {
             static_assert(Type::create<From>() != Type::create<To>());
             return rectified_scope->convert<From, To>(p_from, p_to);
         }
-        template<typename From, typename To>
-        Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-            static_assert(Type::create<From>() != Type::create<To>());
-            return rectified_scope->primitive_convert<From, To>(p_from, p_to);
-        }
+//        template<typename From, typename To>
+//        Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+//            static_assert(Type::create<From>() != Type::create<To>());
+//            return rectified_scope->primitive_convert<From, To>(p_from, p_to);
+//        }
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             return rectified_scope->function_return<R>(p_var);
         }

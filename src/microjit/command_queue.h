@@ -74,6 +74,31 @@ namespace microjit {
             std::function<decltype((p_instance->*f)(args...))()> func = std::bind(std::forward<F>(f), p_instance, std::forward<Args>(args)...);
             return dispatch_internal(func);
         }
+        template<typename F, typename...Args>
+        auto sync(F&& f, Args&&... args) -> decltype(f(args...)) {
+            if (ManagedThread::this_thread_id() == server.get_id())
+                MJ_RAISE("Cannot sync a task from inside CommandQueue server");
+            std::function<decltype(f(args...))()> func = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+            auto promise = dispatch_internal(func);
+            promise.wait();
+            return promise.get();
+        }
+        template<typename T, typename F, typename...Args>
+        auto sync_method(T* p_instance, F&& f, Args&&... args) -> decltype((p_instance->*f)(args...)) {
+            if (ManagedThread::this_thread_id() == server.get_id())
+                MJ_RAISE("Cannot sync a task from inside CommandQueue server");
+            std::function<decltype((p_instance->*f)(args...))()> func = std::bind(std::forward<F>(f), p_instance, std::forward<Args>(args)...);
+            auto promise = dispatch_internal(func);
+            return promise.get();
+        }
+        template<typename T, typename F, typename...Args>
+        auto sync_method(const T* p_instance, F&& f, Args&&... args) -> decltype((p_instance->*f)(args...)) {
+            if (ManagedThread::this_thread_id() == server.get_id())
+                MJ_RAISE("Cannot sync a task from inside CommandQueue server");
+            std::function<decltype((p_instance->*f)(args...))()> func = std::bind(std::forward<F>(f), p_instance, std::forward<Args>(args)...);
+            auto promise = dispatch_internal(func);
+            return promise.get();
+        }
     };
 }
 

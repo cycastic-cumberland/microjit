@@ -5,6 +5,7 @@
 #ifndef MICROJIT_EXPERIMENT_COMPILATION_AGENT_H
 #define MICROJIT_EXPERIMENT_COMPILATION_AGENT_H
 
+#include "decaying_weighted_cache.h"
 #include "instructions.h"
 #include "utils.h"
 #include "thread_pool.h"
@@ -14,12 +15,33 @@
 
 namespace microjit
 {
+    struct HandlerStub {
+        const std::function<void()> eviction_handler;
+        explicit HandlerStub(const std::function<void()>& p_handler) : eviction_handler(p_handler){}
+        ~HandlerStub() { eviction_handler(); }
+    };
+    enum CompilationAgentHandlerType {
+        SINGLE_UNSAFE,
+        MULTI_QUEUED,
+        MULTI_POOLED
+    };
+    struct CompilationAgentSettings {
+        CompilationAgentHandlerType type;
+        size_t cache_capacity;
+        double decay_per_invocation;
+        double decay_rate;
+        double decay_frequency;
+        double cleanup_frequency;
+        uint8_t initial_compiler_thread_count;
+    };
     class CompilationHandler {
     protected:
         Ref<MicroJITCompiler> compiler;
         MicroJITCompiler::CompilationResult compile(const Ref<RectifiedFunction>& p_func);
-
-        explicit CompilationHandler(const Ref<MicroJITCompiler>& p_compiler) : compiler(p_compiler) {}
+        Ref<MicroJITRuntime> runtime;
+        CompilationAgentSettings settings;
+        explicit CompilationHandler(const CompilationAgentSettings& p_settings, const Ref<MicroJITCompiler>& p_compiler, const Ref<MicroJITRuntime>& p_runtime)
+            : settings(p_settings), compiler(p_compiler), runtime(p_runtime) {}
     public:
         typedef void(*VirtualStackFunction)(VirtualStack*);
         virtual ~CompilationHandler() = default;
@@ -28,35 +50,45 @@ namespace microjit
         virtual VirtualStackFunction recompile(const Ref<RectifiedFunction> &p_func) = 0;
         virtual bool remove_function(const Ref<RectifiedFunction>& p_func) = 0;
         virtual bool remove_function(const void* p_host) = 0;
+        virtual void change_settings(const CompilationAgentSettings& p_new_settings) { settings = p_new_settings; }
+        virtual void register_heat(const void* p_host) = 0;
     };
     class SingleUnsafeCompilationHandler : public CompilationHandler {
         std::unordered_map<size_t, CompilationHandler::VirtualStackFunction> function_map{};
     public:
-        explicit SingleUnsafeCompilationHandler(const Ref<MicroJITCompiler>& p_compiler) : CompilationHandler(p_compiler) {}
+        SingleUnsafeCompilationHandler(const CompilationAgentSettings& p_settings, const Ref<MicroJITCompiler>& p_compiler, const Ref<MicroJITRuntime>& p_runtime)
+            : CompilationHandler(p_settings, p_compiler, p_runtime) {}
 
         bool function_compiled(const Ref<RectifiedFunction> &p_func) const override;
         VirtualStackFunction get_or_create(const Ref<RectifiedFunction> &p_func) override;
         VirtualStackFunction recompile(const Ref<RectifiedFunction> &p_func) override;
         bool remove_function(const Ref<RectifiedFunction>& p_func) override;
         bool remove_function(const void* p_host) override;
+        void register_heat(const void* p_host) override {  }
     };
     class CommandQueueCompilationHandler : public CompilationHandler {
         std::unordered_map<size_t, CompilationHandler::VirtualStackFunction> function_map{};
+        DecayingWeightedCache<size_t, Box<HandlerStub>> function_cache;
+        ManagedThread garbage_collector{};
+        bool is_terminated = false;
         mutable CommandQueue queue{};
-
     private:
         bool function_compiled_internal(const Ref<RectifiedFunction> &p_func) const;
         VirtualStackFunction get_or_create_internal(const Ref<RectifiedFunction> &p_func);
         VirtualStackFunction recompile_internal(const Ref<RectifiedFunction> &p_func);
+        VirtualStackFunction compile_from_scratch(const Ref<RectifiedFunction> &p_func);
         bool remove_function_internal(const void* p_host);
+        void register_heat_internal(const void* p_host);
     public:
-        explicit CommandQueueCompilationHandler(const Ref<MicroJITCompiler>& p_compiler) : CompilationHandler(p_compiler) {}
+        CommandQueueCompilationHandler(const CompilationAgentSettings& p_settings, const Ref<MicroJITCompiler>& p_compiler, const Ref<MicroJITRuntime>& p_runtime);
+        ~CommandQueueCompilationHandler() override;
 
         bool function_compiled(const Ref<RectifiedFunction> &p_func) const override;
         VirtualStackFunction get_or_create(const Ref<RectifiedFunction> &p_func) override;
         VirtualStackFunction recompile(const Ref<RectifiedFunction> &p_func) override;
         bool remove_function(const Ref<RectifiedFunction>& p_func) override;
         bool remove_function(const void* p_host) override;
+        void register_heat(const void* p_host) override;
     };
     class ThreadPoolCompilationHandler : public CompilationHandler {
     public:
@@ -64,31 +96,30 @@ namespace microjit
     private:
         Ref<MicroJITRuntime> runtime;
         std::unordered_map<size_t, CompilationHandler::VirtualStackFunction> function_map{};
+        DecayingWeightedCache<size_t, Box<HandlerStub>> function_cache;
+        ManagedThread garbage_collector{};
+        bool is_terminated = false;
         const compiler_spawner spawner;
-        mutable ThreadPool pool{};
+        mutable ThreadPool pool;
         mutable RWLock lock{};
     private:
         bool function_compiled_internal(const Ref<RectifiedFunction> &p_func) const;
         VirtualStackFunction get_or_create_internal(const Ref<RectifiedFunction> &p_func);
         VirtualStackFunction recompile_internal(const Ref<RectifiedFunction> &p_func);
+        VirtualStackFunction compile_from_scratch(const Ref<RectifiedFunction> &p_func);
         bool remove_function_internal(const void* p_host);
+        void register_heat_internal(const void* p_host);
     public:
         ThreadPoolCompilationHandler() = delete;
-        explicit ThreadPoolCompilationHandler(compiler_spawner p_spawner, const Ref<MicroJITRuntime>& p_runtime)
-            : CompilationHandler(Ref<MicroJITCompiler>::null()), spawner(p_spawner), runtime(p_runtime) {
-            runtime = Ref<MicroJITRuntime>::make_ref();
-        }
+        explicit ThreadPoolCompilationHandler(const CompilationAgentSettings& p_settings, compiler_spawner p_spawner, const Ref<MicroJITRuntime>& p_runtime);
+        ~ThreadPoolCompilationHandler() override;
 
         bool function_compiled(const Ref<RectifiedFunction> &p_func) const override;
         VirtualStackFunction get_or_create(const Ref<RectifiedFunction> &p_func) override;
         VirtualStackFunction recompile(const Ref<RectifiedFunction> &p_func) override;
         bool remove_function(const Ref<RectifiedFunction>& p_func) override;
         bool remove_function(const void* p_host) override;
-    };
-    enum CompilationAgentHandlerType {
-        SINGLE_UNSAFE,
-        MULTI_QUEUED,
-        MULTI_POOLED
+        void register_heat(const void* p_host) override;
     };
     template <class CompilerTy>
     class CompilationAgent {
@@ -101,16 +132,16 @@ namespace microjit
         CompilationHandler* handler{};
         Ref<MicroJITRuntime> runtime{Ref<MicroJITRuntime>::make_ref()};
     public:
-        explicit CompilationAgent(CompilationAgentHandlerType p_type){
-            switch (p_type) {
+        explicit CompilationAgent(const CompilationAgentSettings& p_settings){
+            switch (p_settings.type) {
                 case SINGLE_UNSAFE:
-                    handler = new SingleUnsafeCompilationHandler(create_compiler(runtime));
+                    handler = new SingleUnsafeCompilationHandler(p_settings, create_compiler(runtime), runtime);
                     break;
                 case MULTI_QUEUED:
-                    handler = new CommandQueueCompilationHandler(create_compiler(runtime));
+                    handler = new CommandQueueCompilationHandler(p_settings, create_compiler(runtime), runtime);
                     break;
                 case MULTI_POOLED:
-                    handler = new ThreadPoolCompilationHandler(create_compiler, runtime);
+                    handler = new ThreadPoolCompilationHandler(p_settings, create_compiler, runtime);
                     break;
             }
         }
@@ -131,6 +162,12 @@ namespace microjit
         }
         bool remove_function(const void* p_host) {
             return handler->remove_function(p_host);
+        }
+        void register_heat(const void* p_host){
+            // TODO: Fill this in
+        }
+        void register_heat(const Ref<RectifiedFunction>& p_func){
+            register_heat(p_func->host);
         }
     };
 }

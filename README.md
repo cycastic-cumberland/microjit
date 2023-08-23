@@ -1,7 +1,7 @@
 # MicroJIT
 
 
-MicroJIT is a lightweight Just-In-Time compilation library designed in C++.
+MicroJIT is a lightweight, Just-In-Time compilation library designed in C++.
 
 **This project is in the early stage of its lifetime so most features currently do not work, correctly or at all**
 
@@ -48,7 +48,7 @@ to dynamically generate codes.
 
 Start by including `microjit/orchestrator.h`
 
-The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and cache `FunctionInstance` objects. By default, it is atomically reference-counted, which allows it to be used concurrently and can be cleaned-up automatically, as long as there's no nested reference.
+The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and function_cache `FunctionInstance` objects. By default, it is atomically reference-counted, which allows it to be used concurrently and can be cleaned-up automatically, as long as there's no nested reference.
 
 All othe major components of MicroJIT are also reference counted (albeit not atomically), so no further memory management is needed.
 
@@ -82,6 +82,7 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 
 ### Basic features
 
+- [x] Compile-and-go
 - [x] x86_64 support
 - [x] Generic functions
 - [x] Variables
@@ -89,25 +90,23 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 - [x] Arguments
 - [x] Return value
 - [x] Orchestrator's basic functionalities
-- [x] Compilation cache
+- [x] Compilation function_cache
 - [x] Construction/Copy construction/Destruction
 - [x] Virtual stack extraction
 - [x] Multiple scopes
-- [x] Type casting
-- [ ] (Primitive) Type casting
+- [x] Type casting (Non-inline)
 - [ ] Operations (and overloaded operator call)
 - [ ] Branches (if/else/for/while)
 - [ ] Native function call
 - [ ] JIT compiled function call
-- [x] Lazy compilation for JIT compiled function call
-- [ ] LRU
+- [x] Compile-and-go for JIT compiled function call
 - [ ] Documentation
 
 ### Advanced features
 
-- [ ] Asynchronous compilation
-- [ ] Optimization
-- [ ] x86 support
+- [x] Asynchronous compilation
+- [ ] More optimizations
+- [ ] x86 and Windows support
 - TBA...
 
 ## Targets

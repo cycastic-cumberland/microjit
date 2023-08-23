@@ -23,6 +23,7 @@ static constexpr auto esi = asmjit::x86::esi;
 
 static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
+#define VSTACK_LOC asmjit::x86::qword_ptr(rbp, -ptrs)
 #define LOAD_VRBP_LOC (-(ptrs * 4))
 #define STORE_VRBP asmjit::x86::qword_ptr(rbp, -(ptrs * 2))
 #define STORE_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 3))
@@ -76,7 +77,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     AINL("Setting up virtual stack");
     // Move the VirtualStack pointer from the first argument (rdi)
     // to the first slot of the stack
-    AIN(assembler->mov(asmjit::x86::qword_ptr(rbp, -ptrs), rdi));
+    AIN(assembler->mov(VSTACK_LOC, rdi));
     AIN(assembler->call(virtual_stack_get_rbp));
     // The address to virtual rbp is now at rbp - 16
     AIN(assembler->mov(STORE_VRBP, rax));

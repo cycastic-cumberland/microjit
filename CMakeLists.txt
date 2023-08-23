@@ -40,9 +40,10 @@ add_library(microjit
         src/microjit/compilation_agent.h
         src/microjit/command_queue.h
         src/microjit/compilation_agent.cpp
+        src/microjit/decaying_weighted_cache.h
 )
 
-set(PYTHON_EXECUTABLE python3)
+set(PYTHON_EXECUTABLE python)
 
 add_custom_target(
         generate_primitive_conversion_map ALL

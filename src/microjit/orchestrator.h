@@ -19,7 +19,6 @@ namespace microjit {
     struct VirtualStackSettings {
         size_t vstack_default_size = 1024 * 1024 * 8;
         size_t vstack_buffer_size = 128;
-        uint8_t starting_pool_size = 4;
     };
     template<class CompilerTy, class RefCounter = ThreadSafeObject>
     class OrchestratorComponent : public RefCounter {
@@ -108,6 +107,7 @@ namespace microjit {
             _NO_DISCARD_ const VirtualStackSettings& get_settings() const;
             template<typename R, typename ...Args>
             void detach_instance(const FunctionInstance<R, Args...>* p_instance, const void* p_func) const;
+            void register_heat(const Ref<RectifiedFunction>& p_func) const;
         };
     private:
         friend struct InstanceHub;
@@ -144,12 +144,20 @@ namespace microjit {
         void detach_instance(const FunctionInstance<R, Args...>* p_instance, const void* p_func){
             rectified_detach_instance(p_instance, p_func);
         }
+        void register_heat(const Ref<RectifiedFunction>& p_func){
+            agent.register_heat(p_func);
+        }
+        static constexpr auto agent_settings = CompilationAgentSettings{CompilationAgentHandlerType::MULTI_POOLED,
+                                                                        6, 1.0, 0.1,
+                                                                        50'000.0, 50'000.0,
+                                                                        8};
     public:
-        explicit OrchestratorComponent(CompilationAgentHandlerType p_type = CompilationAgentHandlerType::SINGLE_UNSAFE)
-            : hub(this), agent(p_type) {
+        explicit OrchestratorComponent(const CompilationAgentSettings& p_settings)
+            : hub(this), agent(p_settings) {
             runtime = Ref<MicroJITRuntime>::make_ref();
             compiler = Ref<CompilerTy>::make_ref(runtime);
         }
+        OrchestratorComponent(): OrchestratorComponent(agent_settings) {}
         template<typename R, typename ...Args>
         _ALWAYS_INLINE_ InstanceWrapper<R, Args...> create_instance() {
             return create_instance_internal<R, Args...>();
@@ -160,6 +168,11 @@ namespace microjit {
         }
         // _NO_DISCARD_ VirtualStackSettings& edit_vstack_settings() { return settings; }
     };
+
+    template<class CompilerTy, class RefCounter>
+    void OrchestratorComponent<CompilerTy, RefCounter>::InstanceHub::register_heat(const Ref<RectifiedFunction> &p_func) const {
+        parent->register_heat(p_func);
+    }
 
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
@@ -185,6 +198,7 @@ namespace microjit {
               settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()) {
         function->get_trampoline() = [this](VirtualStack* p_stack) -> void {
             compile_internal(&compiled_function);
+            // No need to set up or clean the virtual stack
             real_compiled_function(p_stack);
         };
     }
