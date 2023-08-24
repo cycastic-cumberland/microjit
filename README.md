@@ -1,13 +1,15 @@
 # MicroJIT
 
 
-MicroJIT is a lightweight, Just-In-Time compilation library designed in C++.
+MicroJIT is a lightweight Dynamic Compilation Framework designed to enable developers
+with efficient runtime code generation.
 
 **This project is in the early stage of its lifetime so most features currently do not work, correctly or at all**
 
 ## Requirement
 
-MicroJIT makes extensive use of variadic template, which require C++ 17 or above. It has been tested with GCC 13.2.1
+MicroJIT makes extensive use of variadic template and attributes, which require C++ 17 or above.
+It has been tested with clang 15.0.7.
 
 ## Getting Started
 
@@ -50,7 +52,7 @@ Start by including `microjit/orchestrator.h`
 
 The `MicroJITOrchestrator` class is the heart of MicroJIT, which compile and function_cache `FunctionInstance` objects. By default, it is atomically reference-counted, which allows it to be used concurrently and can be cleaned-up automatically, as long as there's no nested reference.
 
-All othe major components of MicroJIT are also reference counted (albeit not atomically), so no further memory management is needed.
+All other major components of MicroJIT are also reference counted (albeit not atomically), so no further memory management is needed.
 
 A `FunctionInstance` is a utility class which manage and compile your functions. `FunctionInstance` support lazy compilation, the first time it is invoked, it will forward the compilation request to the Orchestrator, which will in turn return the compiled callback, provided by AsmJit. Any subsequence invocation will use the compiled callback.
 
@@ -61,22 +63,27 @@ auto re1 = instance(12);  // This will compile the function and call it
 auto re2 = instance(122); // This will call the compiled code immediately
 ```
 
-To edit you function, first call `get_function()` from the `FunctionInstance` object.
+To edit your function, first call `get_function()` from the `FunctionInstance` object.
 
 ```c++
 auto function = instance->get_function();
 ```
 
-The return value is of type `Ref<Function<R, Args...>>`. This generic object store the argument list and (generic) main scope. All function generic scopes are just wrapper for `RectifiedScope`, which does not use template (at least at class level), allowing IntelliSense to work without all template arguments filled. Despite this, type checking still work thanks to the serialized type data provided by `Type`.
+The return value is of type `Ref<Function<R, Args...>>`.
+This generic object store the argument list and (generic) main scope.
+All function generic scopes are just wrapper for `RectifiedScope`,
+which does not use template (at least at class level),
+allowing IntelliSense to work without all template arguments filled.
+Despite this, type checking still work thanks to the serialized type data provided by `Type`.
 
 ```c++
 template<typename T>
-static Type get_type_info(){
+static constexpr Type get_type_info(){
     return Type::create<T>();
 }
 ```
 
-All instructions are issued through `Scope<R, Args...>`. In near future, nested scopes will be supported, but for now you can only play with the main scope.
+All instructions are issued through `Scope<R, Args...>`. All variables can only be constructed inside the scope that owns it.
 
 ## Feature checklist
 
@@ -97,9 +104,9 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 - [x] Type casting (Non-inline)
 - [ ] Operations (and overloaded operator call)
 - [ ] Branches (if/else/for/while)
-- [ ] Native function call
-- [ ] JIT compiled function call
+- [x] JIT compiled function call
 - [x] Compile-and-go for JIT compiled function call
+- [ ] Native function call
 - [ ] Documentation
 
 ### Advanced features
@@ -114,10 +121,11 @@ All instructions are issued through `Scope<R, Args...>`. In near future, nested 
 This library has been tested on the following target(s):
 
 |        | gcc (Linux) | clang (Linux) | MSVC (Windows) | MinGW (Windows) |
-|--------|-------------|:-------------:|----------------|-----------------|
+|--------|:-----------:|:-------------:|:--------------:|-----------------|
 | x86    |             |               |                |                 |
-| x86_64 |             |   &#10004;    |                |                 |
+| x86_64 |   &#215;    |   &#10004;    |       *        |                 |
 
+*: The example worked on Windows using MSVC, but I've yet to run the whole test suite
 
 ## License
 

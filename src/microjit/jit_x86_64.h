@@ -14,7 +14,6 @@
 #include "jit.h"
 #include "x86_64_primitive_converter.gen.h"
 
-//#define VERBOSE_ASSEMBLER_LOG
 
 #if defined(DEBUG_ENABLED) && defined(VERBOSE_ASSEMBLER_LOG) && !defined(AIN)
 #include <iostream>
@@ -22,7 +21,7 @@
 #define AIN(m_action) std::cout << "[ASM: " << (__LINE__) << "]\t" << &(#m_action)[11] << "\n"; (m_action)
 #else
 #define AINL(m_message) ((void)0)
-#define AIN(m_action) (m_action)
+#define AIN(m_action) m_action
 #endif
 
 namespace microjit {
@@ -38,21 +37,34 @@ namespace microjit {
         template<class T>
         static void copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
                                              const microjit::Ref<T> &p_instruction);
+        static void copy_immediate_primitive_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                             const Ref<ImmediateValue>& p_value);
         template<class T>
         static void copy_immediate(microjit::Box<asmjit::x86::Assembler> &assembler,
                                    const microjit::Ref<T> &p_instruction);
-        static void copy_variable(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                  const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction,
-                                  const int64_t& p_offset,
-                                  const int64_t& p_copy_target);
+        static void copy_immediate_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                            const Ref<ImmediateValue>& p_value, const void* p_ctor);
+        static void copy_construct_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                     const Type& p_type,
+                                                     const void* p_copy_constructor,
+                                                     const int64_t& p_offset,
+                                                     const int64_t& p_copy_target);
+        static void assign_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                             const microjit::Type &p_type,
+                                             const void* p_operator,
+                                             const int64_t& p_offset,
+                                             const int64_t& p_copy_target);
         static void assign_variable(microjit::Box<asmjit::x86::Assembler> &assembler,
                                     const microjit::Ref<microjit::AssignInstruction> &p_instruction,
                                     const int64_t& p_offset,
                                     const int64_t& p_copy_target);
         static void iterative_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
                                               const Ref<StackFrameInfo>& p_frame_info,
-                                              std::stack<ScopeInfo>& p_scope_stack);
-
+                                              const std::stack<ScopeInfo>& p_scope_stack);
+        static void single_scope_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                 const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
+                                                 const microjit::MicroJITCompiler_x86_64::ScopeInfo &p_current_scope);
+        static void trampoline_caller(const std::function<void(microjit::VirtualStack*)>* p_trampoline, VirtualStack* p_stack);
     protected:
         CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const override;
     public:
@@ -64,72 +76,15 @@ namespace microjit {
 template<class T>
 void microjit::MicroJITCompiler_x86_64::copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                                  const microjit::Ref<T> &p_instruction) {
-    const auto& type_data = p_instruction->target_variable->type;
     auto imm = p_instruction->value_reference.template c_style_cast<ImmediateValue>();
-    auto as_byte_array = imm->data;
-    switch (type_data.size) {
-        case 1:
-            AIN(assembler->mov(asmjit::x86::cl, *(const uint8_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rdi), asmjit::x86::cl));
-            break;
-        case 2:
-            AIN(assembler->mov(asmjit::x86::cx, *(const uint16_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rdi), asmjit::x86::cx));
-            break;
-        case 4:
-            AIN(assembler->mov(asmjit::x86::ecx, *(const uint32_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rdi), asmjit::x86::ecx));
-            break;
-        case 8:
-            AIN(assembler->mov(asmjit::x86::rcx, *(const uint64_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rdi), asmjit::x86::rcx));
-            break;
-    }
+    copy_immediate_primitive_internal(assembler, imm);
 }
 
 template<class T>
 void microjit::MicroJITCompiler_x86_64::copy_immediate(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                        const microjit::Ref<T> &p_instruction) {
-    const auto& type_data = p_instruction->target_variable->type;
     auto imm = p_instruction->value_reference.template c_style_cast<ImmediateValue>();
-    // The value to be copied, as byte array
-    auto as_byte_array = imm->data;
-    // Copy destination is currently in rdi
-    // Allocate immediate value space on real stack
-    // Copy the value onto real stack, byte by byte
-    AIN(assembler->sub(asmjit::x86::rsp, type_data.size));
-    // Copying by receding chunks did not work, not sure why
-    // Copying bytes-by-bytes would have to do it for now
-    switch (type_data.size) {
-        case 1:{
-            AIN(assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsp), *(const uint8_t*)as_byte_array));
-            break;
-        }
-        case 2:{
-            AIN(assembler->mov(asmjit::x86::word_ptr(asmjit::x86::rsp), *(const uint16_t*)as_byte_array));
-            break;
-        }
-        case 4:{
-            AIN(assembler->mov(asmjit::x86::dword_ptr(asmjit::x86::rsp), *(const uint32_t*)as_byte_array));
-            break;
-        }
-        case 8:{
-            AIN(assembler->mov(asmjit::x86::rcx, *(const uint64_t*)as_byte_array));
-            AIN(assembler->mov(asmjit::x86::qword_ptr(asmjit::x86::rsp), asmjit::x86::rcx));
-            break;
-        }
-        default:{
-            for (auto seek = decltype(type_data.size)(); seek < type_data.size; seek++) {
-                AIN(assembler->mov(asmjit::x86::byte_ptr(asmjit::x86::rsp, seek), ((const uint8_t*)as_byte_array)[seek]));
-            }
-        }
-    }
-    // Move copy target (which is going to be real rsp) to rsi
-    AIN(assembler->mov(asmjit::x86::rsi, asmjit::x86::rsp));
-    // Call copy constructor
-    AIN(assembler->call(p_instruction->ctor));
-    // Return the stack space
-    AIN(assembler->add(asmjit::x86::rsp, type_data.size));
+    copy_immediate_internal(assembler, imm, p_instruction->ctor);
 }
 
 

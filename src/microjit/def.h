@@ -5,6 +5,12 @@
 #ifndef MICROJIT_DEF_H
 #define MICROJIT_DEF_H
 
+#if defined(__clang__) || defined(_MSC_VER)
+#define USE_TYPE_CONSTEXPR
+#define TYPE_CONSTEXPR constexpr
+#else
+#define TYPE_CONSTEXPR
+#endif
 #ifndef _ALWAYS_INLINE_
 #if defined(__GNUC__)
 #define _ALWAYS_INLINE_ __attribute__((always_inline)) inline

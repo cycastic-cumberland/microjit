@@ -101,7 +101,7 @@ microjit::CompilationHandler::VirtualStackFunction microjit::CommandQueueCompila
         // Will be called inside garbage collector, so no need for locks
         function_map.erase(host_loc);
     });
-    function_cache.push(host_loc, stub);
+//    function_cache.push(host_loc, stub);
     return recompile_internal(p_func);
 }
 
@@ -125,40 +125,9 @@ microjit::CommandQueueCompilationHandler::remove_function(const microjit::Ref<mi
 microjit::CommandQueueCompilationHandler::CommandQueueCompilationHandler(const microjit::CompilationAgentSettings &p_settings,
                                                                          const microjit::Ref<microjit::MicroJITCompiler> &p_compiler,
                                                                          const microjit::Ref<microjit::MicroJITRuntime> &p_runtime)
-        : function_cache(settings.cache_capacity, settings.decay_rate),
+        : /*function_cache(settings.cache_capacity, settings.decay_rate),*/
           CompilationHandler(p_settings, p_compiler, p_runtime) {
-//    garbage_collector.start([this]() -> void {
-//        static constexpr auto step = std::chrono::microseconds(100);
-//        const auto decay_us = size_t((1.0 / settings.decay_frequency) * 1'000'000.0);
-//        const auto cleanup_us = size_t((1.0 / settings.cleanup_frequency) * 1'000'000.0);
-//        auto now = get_time_us();
-//        auto last_decay = now;
-//        auto last_cleanup = now;
-//        std::future<void> decay_promise{};
-//        std::future<void> cleanup_promise{};
-//        while (!is_terminated){
-//            std::this_thread::sleep_for(step);
-//            now = get_time_us();
-//            bool decayed = false;
-//            bool cleanup_up = false;
-//            if (now - last_decay > decay_us) {
-//                decay_promise = queue.dispatch_method(&function_cache, &DecayingWeightedCache<size_t, Box<HandlerStub>>::decay, now - last_decay);
-//                decayed = true;
-//            }
-//            if (now - last_cleanup > cleanup_us) {
-//                cleanup_promise = queue.dispatch_method(&function_cache, &DecayingWeightedCache<size_t, Box<HandlerStub>>::cleanup);
-//                cleanup_up = true;
-//            }
-//            if (decayed){
-//                decay_promise.wait();
-//                last_decay = get_time_us();
-//            }
-//            if (cleanup_up) {
-//                cleanup_promise.wait();
-//                last_cleanup = get_time_us();
-//            }
-//        }
-//    });
+
 }
 
 microjit::CommandQueueCompilationHandler::~CommandQueueCompilationHandler() {
@@ -167,7 +136,7 @@ microjit::CommandQueueCompilationHandler::~CommandQueueCompilationHandler() {
 }
 
 void microjit::CommandQueueCompilationHandler::register_heat_internal(const void *p_host) {
-    function_cache.at((size_t)p_host)->heat += settings.decay_per_invocation;
+//    function_cache.at((size_t)p_host)->heat += settings.decay_per_invocation;
 }
 
 void microjit::CommandQueueCompilationHandler::register_heat(const void *p_host) {
@@ -234,8 +203,6 @@ static thread_local microjit::Ref<microjit::MicroJITCompiler> thread_specific_co
 
 microjit::CompilationHandler::VirtualStackFunction
 microjit::ThreadPoolCompilationHandler::recompile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    if (thread_specific_compiler.is_null())
-        thread_specific_compiler = spawner(runtime);
     auto result = thread_specific_compiler->compile(p_func);
     if (result.error) return nullptr;
     auto ret = (VirtualStackFunction)result.assembly->callback;
@@ -248,15 +215,15 @@ microjit::ThreadPoolCompilationHandler::recompile_internal(const microjit::Ref<m
 
 microjit::CompilationHandler::VirtualStackFunction
 microjit::ThreadPoolCompilationHandler::compile_from_scratch(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    auto host_loc = (size_t)p_func->host;
-    auto stub = Box<HandlerStub>::make_box([this, host_loc]() -> void {
-        // Will be called inside garbage collector, so no need for locks
-        function_map.erase(host_loc);
-    });
-    {
-        WriteLockGuard guard(lock);
-        function_cache.push(host_loc, stub);
-    }
+//    auto host_loc = (size_t)p_func->host;
+//    auto stub = Box<HandlerStub>::make_box([this, host_loc]() -> void {
+//        // Will be called inside garbage collector, so no need for locks
+//        function_map.erase(host_loc);
+//    });
+//    {
+//        WriteLockGuard guard(lock);
+//        function_cache.push(host_loc, stub);
+//    }
     return recompile_internal(p_func);
 }
 
@@ -266,6 +233,7 @@ bool microjit::ThreadPoolCompilationHandler::remove_function_internal(const void
     WriteLockGuard guard(lock);
     if (function_map.find((size_t)(p_host)) == function_map.end()) return false;
     auto cb = function_map.at((size_t)p_host);
+    // Need not locking the runtime
     runtime->get_asmjit_runtime().release(cb);
     function_map.erase((size_t)p_host);
     return true;
@@ -276,12 +244,22 @@ microjit::ThreadPoolCompilationHandler::~ThreadPoolCompilationHandler() {
 //    garbage_collector.join();
 }
 
+// No more checking for compiler every time!
+static std::function<void()> construct_compiler(microjit::ThreadPoolCompilationHandler::compiler_spawner p_spawner,
+                                                const microjit::Ref<microjit::MicroJITRuntime> &p_runtime){
+    auto runtime = p_runtime;
+    auto packed = [p_spawner, runtime]() -> void {
+        thread_specific_compiler = p_spawner(runtime);
+    };
+    return packed;
+}
+
 microjit::ThreadPoolCompilationHandler::ThreadPoolCompilationHandler(const CompilationAgentSettings& p_settings,
         microjit::ThreadPoolCompilationHandler::compiler_spawner p_spawner,
         const microjit::Ref<microjit::MicroJITRuntime> &p_runtime)
         : CompilationHandler(p_settings, Ref<MicroJITCompiler>::null(), p_runtime),
-          spawner(p_spawner), function_cache(settings.cache_capacity, settings.decay_rate),
-          pool(settings.initial_compiler_thread_count) {
+          spawner(p_spawner), /*function_cache(settings.cache_capacity, settings.decay_rate),*/
+          pool(settings.initial_compiler_thread_count, construct_compiler(p_spawner, p_runtime)) {
     runtime = Ref<MicroJITRuntime>::make_ref();
     // This feature is not well thought our right now...
 //    garbage_collector.start([this]() -> void {
@@ -311,10 +289,10 @@ microjit::ThreadPoolCompilationHandler::ThreadPoolCompilationHandler(const Compi
 }
 
 void microjit::ThreadPoolCompilationHandler::register_heat_internal(const void *p_host) {
-    ReadLockGuard guard(lock);
-    auto entry = function_cache.at((size_t)p_host);
-    std::lock_guard<std::mutex> inner_guard(entry->lock);
-    entry->heat += settings.decay_per_invocation;
+//    ReadLockGuard guard(lock);
+//    auto entry = function_cache.at((size_t)p_host);
+//    std::lock_guard<std::mutex> inner_guard(entry->lock);
+//    entry->heat += settings.decay_per_invocation;
 }
 
 void microjit::ThreadPoolCompilationHandler::register_heat(const void *p_host) {

@@ -34,6 +34,7 @@ namespace microjit {
             const Ref<Function<R, Args...>> function;
             mutable std::function<R(VirtualStack*, Args...)> compiled_function{};
             mutable VirtualStackFunction real_compiled_function{};
+            mutable size_t invocation_count{};
             const VirtualStackSettings& settings;
         private:
             template<typename R2, typename ...Args2>
@@ -53,6 +54,8 @@ namespace microjit {
             R call_with_vstack(VirtualStack* p_stack, Args&&... args) const;
             void recompile() const;
             void detach();
+            // Not atomically counted for performance reasons
+            _NO_DISCARD_ _ALWAYS_INLINE_ size_t get_invocation_count() const { return invocation_count;}
             _ALWAYS_INLINE_ std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
                 compile_internal(&compiled_function);
                 return compiled_function;
@@ -197,9 +200,18 @@ namespace microjit {
             : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()},
               settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()) {
         function->get_trampoline() = [this](VirtualStack* p_stack) -> void {
+            auto** vrsp_ptr = p_stack->rsp();
+            auto** vrbp_ptr = p_stack->rbp();
+            auto old_rsp = *vrsp_ptr;
+            auto old_rbp = *vrbp_ptr;
+            // Using the real stack to cache old vrbp address
+            // mov rbp, rsp
+            *vrbp_ptr = old_rsp;
             compile_internal(&compiled_function);
-            // No need to set up or clean the virtual stack
             real_compiled_function(p_stack);
+            invocation_count++;
+            *vrsp_ptr = old_rsp;
+            *vrbp_ptr = old_rbp;
         };
     }
 
@@ -253,13 +265,19 @@ namespace microjit {
         *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) + sizeof(T));
     }
 
+    template <typename R, typename ...Args>
+    static void swap_lambdas(std::function<R(Args...)>* p_to, std::function<R(Args...)>* p_from){
+        p_to->swap(*p_from);
+    }
+
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
     template<typename... Args2>
     void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
             std::function<void(VirtualStack *, Args2...)> *p_func,
             OrchestratorComponent::VirtualStackFunction p_cb) const {
-        std::function<void(VirtualStack*, Args2...)> new_func = [p_cb](VirtualStack* p_stack, Args2&& ...args) -> void {
+        auto count = &invocation_count;
+        *p_func = [p_cb, count](VirtualStack* p_stack, Args2&& ...args) -> void {
             auto old_rbp = *p_stack->rbp();
             auto old_rsp = *p_stack->rsp();
             (move_argument<Args2>(args, p_stack), ...);
@@ -272,8 +290,8 @@ namespace microjit {
             }
             *p_stack->rbp() = old_rbp;
             *p_stack->rsp() = old_rsp;
+            *count += 1;
         };
-        p_func->swap(new_func);
         real_compiled_function = p_cb;
     }
 
@@ -283,7 +301,8 @@ namespace microjit {
     void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
             std::function<R2(VirtualStack *, Args2...)> *p_func,
             OrchestratorComponent::VirtualStackFunction p_cb) const {
-        std::function<R2(VirtualStack*, Args2...)> new_func = [p_cb](VirtualStack* p_stack, Args2&& ...args) -> R2 {
+        auto count = &invocation_count;
+        std::function<R2(VirtualStack*, Args2...)> new_func = [p_cb, count](VirtualStack* p_stack, Args2&& ...args) -> R2 {
             auto old_rbp = *p_stack->rbp();
             auto old_rsp = *p_stack->rsp();
             (move_argument<Args2>(args, p_stack), ...);
@@ -299,6 +318,7 @@ namespace microjit {
             }
             *p_stack->rbp() = old_rbp;
             *p_stack->rsp() = old_rsp;
+            *count += 1;
             return re;
         };
         p_func->swap(new_func);

@@ -89,6 +89,8 @@ namespace microjit {
                 condition.notify_one();
             }
         };
+        const std::function<void()> prologue;
+        const std::function<void()> epilogue;
         const uint8_t initial_capacity;
         bool is_cleaning_up{false};
         ManagerThread manager_thread{};
@@ -102,6 +104,7 @@ namespace microjit {
             if (is_cleaning_up) return 0;
             auto worker = new ManagedThread();
             worker->start([this, worker]() -> void {
+                if (prologue) prologue();
                 while (true){
                     std::function<void()> func;
                     bool dequeued;
@@ -112,6 +115,7 @@ namespace microjit {
                             termination_flag--;
                             threads_map.erase(worker->get_id());
                             manager_thread.queue_for_disposal(worker);
+                            if (epilogue) epilogue();
                             return;
                         }
                         dequeued = task_queue.try_pop(func);
@@ -247,8 +251,9 @@ namespace microjit {
             return queue_task_internal(p_priority, func);
         }
 
-        explicit ThreadPool(const uint8_t& p_threads = 3)
-                : initial_capacity(p_threads){
+        explicit ThreadPool(const uint8_t& p_threads = 3, const std::function<void()>& p_prologue = std::function<void()>(),
+                            const std::function<void()>& p_epilogue = std::function<void()>())
+                : initial_capacity(p_threads), prologue(p_prologue), epilogue(p_epilogue) {
             init();
         }
 

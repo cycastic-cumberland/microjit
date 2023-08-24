@@ -27,13 +27,13 @@ namespace microjit {
         static void ctor(T* p_obj) { new (p_obj) T(); }
         template<class T>
         static void copy_ctor(T* p_obj, const T* p_copy_target) { new (p_obj) T(*p_copy_target); }
-        static void str_copy_constructor(char* p_obj, const char* p_copy_target) {
-            size_t i = 0;
-            while (auto c = (p_copy_target)[i++]){
-                (p_obj)[i - 1] = c;
-            }
-            (p_obj)[i - 1] = 0;
-        }
+//        static void str_copy_constructor(char* p_obj, const char* p_copy_target) {
+//            size_t i = 0;
+//            while (auto c = (p_copy_target)[i++]){
+//                (p_obj)[i - 1] = c;
+//            }
+//            (p_obj)[i - 1] = 0;
+//        }
         template<class T>
         static void dtor(T* p_obj) { p_obj->~T(); }
         template<class T>
@@ -50,46 +50,46 @@ namespace microjit {
         const size_t size;
         const void* copy_constructor;
         const void* destructor;
-        const bool is_fundamental;
+        const bool is_primitive;
     private:
-        constexpr Type(const std::type_info* p_info,
-                       const size_t& p_size,
-                       const void* p_cc,
-                       const void* p_dtor,
-                       const bool& p_fundamental)
+        TYPE_CONSTEXPR Type(const std::type_info* p_info,
+                            const size_t& p_size,
+                            const void* p_cc,
+                            const void* p_dtor,
+                            const bool& p_fundamental)
                        : type_info(p_info), size(p_size),
-                         copy_constructor(p_cc), destructor(p_dtor), is_fundamental(p_fundamental) {}
+                         copy_constructor(p_cc), destructor(p_dtor), is_primitive(p_fundamental) {}
 
-        static constexpr Type create_internal(void (*)()){
-            constexpr auto copy_ctor = (const void*)ObjectTools::empty_copy_ctor;
-            constexpr auto dtor = (const void*)ObjectTools::empty_dtor;
+        static TYPE_CONSTEXPR Type create_internal(void (*)()){
+            TYPE_CONSTEXPR auto copy_ctor = (const void*)ObjectTools::empty_copy_ctor;
+            TYPE_CONSTEXPR auto dtor = (const void*)ObjectTools::empty_dtor;
             return { &typeid(void), 0, copy_ctor, dtor, true };
         }
 
         template<typename T>
-        static constexpr Type create_internal(T (*)()){
-            constexpr auto is_trivially_destructible  = std::is_trivially_destructible_v<T>;
+        static TYPE_CONSTEXPR Type create_internal(T (*)()){
+            TYPE_CONSTEXPR auto is_trivially_destructible  = std::is_trivially_destructible_v<T>;
 
-            constexpr auto copy_ctor = (const void*)ObjectTools::copy_ctor<T>;
-            constexpr auto dtor = (is_trivially_destructible ?
-                                            (const void*)ObjectTools::empty_dtor :
-                                            (const void*)ObjectTools::dtor<T>);
-            constexpr auto fundamental = std::is_fundamental_v<T>;
+            TYPE_CONSTEXPR auto copy_ctor = (const void*)ObjectTools::copy_ctor<T>;
+            TYPE_CONSTEXPR auto dtor = (is_trivially_destructible ?
+                                        (const void*)ObjectTools::empty_dtor :
+                                        (const void*)ObjectTools::dtor<T>);
+            TYPE_CONSTEXPR auto fundamental = std::is_fundamental_v<T>;
             return { &typeid(T), sizeof(T), copy_ctor, dtor, fundamental };
         }
 
     public:
-        _NO_DISCARD_ _ALWAYS_INLINE_ constexpr bool operator==(const Type& p_right) const {
+        _NO_DISCARD_ _ALWAYS_INLINE_ TYPE_CONSTEXPR bool operator==(const Type& p_right) const {
             return type_info == p_right.type_info;
         }
-        _NO_DISCARD_ _ALWAYS_INLINE_ constexpr bool operator!=(const Type& p_right) const {
+        _NO_DISCARD_ _ALWAYS_INLINE_ TYPE_CONSTEXPR bool operator!=(const Type& p_right) const {
             return type_info != p_right.type_info;
         }
 
         template<typename T>
-        static constexpr Type create(){
+        static TYPE_CONSTEXPR Type create(){
             // A little cheat for void type
-            constexpr T (*f)() = nullptr;
+            TYPE_CONSTEXPR T (*f)() = nullptr;
             return create_internal(f);
         }
     };
@@ -121,7 +121,7 @@ namespace microjit {
         uint32_t scope_offset{};
         friend class RectifiedScope;
     protected:
-        explicit constexpr Instruction(const InstructionType& p_type) : type(p_type) {}
+        explicit TYPE_CONSTEXPR Instruction(const InstructionType& p_type) : type(p_type) {}
     public:
         _ALWAYS_INLINE_ InstructionType get_instruction_type() const { return type; }
         _ALWAYS_INLINE_ uint32_t get_scope_offset() const { return scope_offset; }
@@ -184,7 +184,7 @@ namespace microjit {
         const Type type;
         const uint32_t properties;
     private:
-        constexpr VariableInstruction(const RectifiedScope* p_scope, Type p_type, const uint32_t& p_props)
+        TYPE_CONSTEXPR VariableInstruction(const RectifiedScope* p_scope, Type p_type, const uint32_t& p_props)
             : Instruction(IT_DECLARE_VARIABLE),
               parent_scope(p_scope), type(p_type), properties(p_props) {}
     public:
@@ -253,7 +253,7 @@ namespace microjit {
         }
         template<typename T>
         static Ref<ConstructInstruction> create(const Ref<VariableInstruction>& p_target) {
-            static constexpr auto type = Type::create<T>();
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
             if (type != p_target->type) MJ_RAISE("Mismatched type");
             return create_unsafe<T>(p_target);
         }
@@ -296,7 +296,7 @@ namespace microjit {
         }
         template<typename T>
         static Ref<AssignInstruction> create_imm(const Ref<VariableInstruction>& p_target, const T& p_value) {
-            static constexpr auto type = Type::create<T>();
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
             if (type != p_target->type) MJ_RAISE("Mismatched type");
             return create_imm_unsafe(p_target, p_value);
         }
@@ -304,7 +304,7 @@ namespace microjit {
         static Ref<AssignInstruction> create_arg_unsafe(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx);
         template<typename T>
         static Ref<AssignInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx){
-            static constexpr auto type = Type::create<T>();
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
             if (type != p_target->type) MJ_RAISE("Mismatched type");
             return create_arg_unsafe<T>(p_scope, p_target, p_idx);
         }
@@ -317,7 +317,7 @@ namespace microjit {
         }
         template<typename T>
         static Ref<AssignInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
-            static constexpr auto type = Type::create<T>();
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
             if (type != p_target->type) MJ_RAISE("Mismatched type");
             return create_var_unsafe<T>(p_target, p_assign_target);
         }
@@ -379,18 +379,23 @@ namespace microjit {
     };
     class ArgumentsVector : public ThreadUnsafeObject {
     public:
-        std::vector<Ref<Value>> values{};
+        std::vector<Ref<Value>> values;
+        ArgumentsVector() : values() {  }
     };
     class InvokeJitInstruction : public Instruction {
     public:
         const Ref<RectifiedFunction> target_function;
+        const Ref<VariableInstruction> return_variable;
         const Ref<ArgumentsVector> passed_arguments;
+        const size_t arguments_total_size{};
     private:
-        InvokeJitInstruction(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args);
+        InvokeJitInstruction(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args,
+                             const Ref<VariableInstruction>& p_ret_var, const size_t& p_total_size);
     public:
         static Ref<InvokeJitInstruction> create(const Ref<ArgumentsDeclaration>& p_parent_args,
                                                 const Ref<RectifiedFunction>& p_func,
-                                                const Ref<ArgumentsVector>& p_args);
+                                                const Ref<ArgumentsVector>& p_args,
+                                                const Ref<VariableInstruction>& p_ret_var);
     };
 
     class RectifiedScope : public ThreadUnsafeObject {
@@ -504,8 +509,8 @@ namespace microjit {
         }
         template<typename From, typename To>
         Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-            static constexpr auto f_type = Type::create<From>();
-            static constexpr auto t_type = Type::create<To>();
+            static TYPE_CONSTEXPR auto f_type = Type::create<From>();
+            static TYPE_CONSTEXPR auto t_type = Type::create<To>();
             if (!has_variable_in_all_scope(p_from) || !has_variable_in_all_scope(p_to)) MJ_RAISE("Does not own target");
             if (p_from->type != f_type) MJ_RAISE("Mismatched 'from' type");
             if (p_to->type != t_type) MJ_RAISE("Mismatched 'to' type");
@@ -515,8 +520,8 @@ namespace microjit {
         }
         template<typename From, typename To>
         Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-            static constexpr auto f_type = Type::create<From>();
-            static constexpr auto t_type = Type::create<To>();
+            static TYPE_CONSTEXPR auto f_type = Type::create<From>();
+            static TYPE_CONSTEXPR auto t_type = Type::create<To>();
             if (!has_variable_in_all_scope(p_from) || !has_variable_in_all_scope(p_to)) MJ_RAISE("Does not own target");
             if (p_from->type != f_type) MJ_RAISE("Mismatched 'from' type");
             if (p_to->type != t_type) MJ_RAISE("Mismatched 'to' type");
@@ -524,11 +529,12 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
-        Ref<InvokeJitInstruction> invoke_jit(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args);
+        Ref<InvokeJitInstruction> invoke_jit(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args,
+                                             const Ref<VariableInstruction>& p_ret_var);
         template<typename R>
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             // Does not own this variable;
-            if (p_var.is_null() || !has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
+            if (p_var.is_valid() && !has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
             // Does not match the return type
             static const auto return_type = Type::create<R>();
             // If return type is void, then p_var must be null
@@ -619,14 +625,28 @@ namespace microjit {
         }
         template<typename From, typename To>
         Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+#ifndef USE_TYPE_CONSTEXPR
+            if (Type::create<From>() == Type::create<To>()) MJ_RAISE("Conversion types must be different");
+#else
             static_assert(Type::create<From>() != Type::create<To>());
+#endif
             return rectified_scope->convert<From, To>(p_from, p_to);
         }
-//        template<typename From, typename To>
-//        Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-//            static_assert(Type::create<From>() != Type::create<To>());
-//            return rectified_scope->primitive_convert<From, To>(p_from, p_to);
-//        }
+        template<typename From, typename To>
+        [[deprecated("Primitive conversion currently does not work properly. Please use convert() for now")]]
+        Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+#ifndef USE_TYPE_CONSTEXPR
+            if (Type::create<From>() == Type::create<To>()) MJ_RAISE("Conversion types must be different");
+#else
+            static_assert(Type::create<From>() != Type::create<To>());
+#endif
+            return rectified_scope->primitive_convert<From, To>(p_from, p_to);
+        }
+
+        template<typename R2, typename ...Args2>
+        Ref<InvokeJitInstruction> invoke_jit(const Ref<Function<R2, Args2...>>& p_func,
+                                             const Ref<ArgumentsVector>& p_args = Ref<ArgumentsVector>::null(),
+                                             const Ref<VariableInstruction>& p_ret_var = Ref<VariableInstruction>::null());
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             return rectified_scope->function_return<R>(p_var);
         }
@@ -650,9 +670,9 @@ namespace microjit {
                           const Ref<ArgumentsDeclaration>& p_args,
                           std::function<void(VirtualStack*)>* p_trampoline,
                           const Ref<RectifiedScope>& p_main_scope,
-                          Type p_ret)
+                          const Type& p_ret)
                           : host(p_host), arguments(p_args), trampoline(p_trampoline),
-                            main_scope(p_main_scope), return_type(std::move(p_ret)) {}
+                            main_scope(p_main_scope), return_type(p_ret) {}
     public:
         template <typename R, typename ...Args>
         static Ref<RectifiedFunction> create(const Function<R, Args...>* p_host,
@@ -693,6 +713,13 @@ namespace microjit {
         auto arg = ArgumentValue::create(p_idx).c_style_cast<Value>();
         auto ins = new AssignInstruction(p_target, arg, (const void*)ObjectTools::assign<T>);
         return Ref<AssignInstruction>::from_uninitialized_object(ins);
+    }
+    template<typename R, typename... Args>
+    template<typename R2, typename... Args2>
+    Ref<InvokeJitInstruction>
+    Scope<R, Args...>::invoke_jit(const Ref<Function<R2, Args2...>> &p_func, const Ref<ArgumentsVector> &p_args,
+                                  const Ref<VariableInstruction> &p_ret_var) {
+        return rectified_scope->invoke_jit(p_func->rectify(), p_args, p_ret_var);
     }
 }
 

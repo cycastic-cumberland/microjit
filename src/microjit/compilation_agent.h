@@ -68,7 +68,7 @@ namespace microjit
     };
     class CommandQueueCompilationHandler : public CompilationHandler {
         std::unordered_map<size_t, CompilationHandler::VirtualStackFunction> function_map{};
-        DecayingWeightedCache<size_t, Box<HandlerStub>> function_cache;
+//        DecayingWeightedCache<size_t, Box<HandlerStub>> function_cache;
         ManagedThread garbage_collector{};
         bool is_terminated = false;
         mutable CommandQueue queue{};
@@ -96,7 +96,7 @@ namespace microjit
     private:
         Ref<MicroJITRuntime> runtime;
         std::unordered_map<size_t, CompilationHandler::VirtualStackFunction> function_map{};
-        DecayingWeightedCache<size_t, Box<HandlerStub>> function_cache;
+//        DecayingWeightedCache<size_t, Box<HandlerStub>> function_cache;
         ManagedThread garbage_collector{};
         bool is_terminated = false;
         const compiler_spawner spawner;

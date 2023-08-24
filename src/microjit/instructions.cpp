@@ -41,26 +41,36 @@ void microjit::RectifiedScope::push_instruction(Ref<Instruction> p_ins){
 
 microjit::Ref<microjit::InvokeJitInstruction>
 microjit::RectifiedScope::invoke_jit(const microjit::Ref<microjit::RectifiedFunction> &p_func,
-                                     const microjit::Ref<microjit::ArgumentsVector> &p_args) {
+                                     const microjit::Ref<microjit::ArgumentsVector> &p_args,
+                                     const Ref<VariableInstruction>& p_ret_var) {
     if (!p_func->trampoline) MJ_RAISE("p_func does not have a trampoline function. "
                                       "invoke_jit can only be called on functions that are created by the Orchestrator.");
-    auto ins = InvokeJitInstruction::create(arguments, p_func, p_args);
+    auto args = p_args.is_valid() ? p_args : Ref<ArgumentsVector>::make_ref();
+    auto ins = InvokeJitInstruction::create(arguments, p_func, args, p_ret_var);
     push_instruction(ins.template c_style_cast<Instruction>());
     return ins;
 }
 
 microjit::InvokeJitInstruction::InvokeJitInstruction(const microjit::Ref<microjit::RectifiedFunction> &p_func,
-                                                     const microjit::Ref<microjit::ArgumentsVector> &p_args)
-        : Instruction(IT_INVOKE_JIT), target_function(p_func), passed_arguments(p_args) {}
+                                                     const microjit::Ref<microjit::ArgumentsVector> &p_args,
+                                                     const Ref<VariableInstruction>& p_ret_var, const size_t& p_total_size)
+        : Instruction(IT_INVOKE_JIT), target_function(p_func), passed_arguments(p_args),
+          return_variable(p_ret_var), arguments_total_size(p_total_size) {}
 
 microjit::Ref<microjit::InvokeJitInstruction>
 microjit::InvokeJitInstruction::create(const Ref<ArgumentsDeclaration>& p_parent_args,
                                        const microjit::Ref<microjit::RectifiedFunction> &p_func,
-                                       const microjit::Ref<microjit::ArgumentsVector> &p_args){
+                                       const microjit::Ref<microjit::ArgumentsVector> &p_args,
+                                       const Ref<VariableInstruction>& p_ret_var){
     const auto& func_args = p_func->arguments;
     const auto& func_arg_types = func_args->argument_types();
     const auto& parent_arg_types = p_parent_args->argument_types();
     const auto& arg_values = p_args->values;
+    size_t total_size = 0;
+    // There can be no return variable, if you want to discard the return result
+    if (p_ret_var.is_valid())
+        if (p_ret_var->type != p_func->return_type)
+            MJ_RAISE("Mismatched return type");
     if (parent_arg_types.size() != func_arg_types.size() ||
         func_arg_types.size() != arg_values.size())
         MJ_RAISE("Mismatched arguments size");
@@ -71,22 +81,26 @@ microjit::InvokeJitInstruction::create(const Ref<ArgumentsDeclaration>& p_parent
             case Value::VAL_IMMEDIATE: {
                 auto as_imm = argument_value.c_style_cast<ImmediateValue>();
                 if (as_imm->imm_type != target_type) MJ_RAISE("Mismatched argument type");
+                total_size += as_imm->imm_type.size;
                 break;
             }
             case Value::VAL_ARGUMENT: {
                 auto as_arg = argument_value.c_style_cast<ArgumentValue>();
                 auto model_type = parent_arg_types[as_arg->argument_index];
                 if (model_type != target_type) MJ_RAISE("Mismatched argument type");
+                total_size += model_type.size;
                 break;
             }
             case Value::VAL_VARIABLE: {
                 auto as_var = argument_value.c_style_cast<VariableValue>();
-                if (as_var->variable->type != target_type) MJ_RAISE("Mismatched argument type");
+                auto var_type = as_var->variable->type;
+                if (var_type != target_type) MJ_RAISE("Mismatched argument type");
+                total_size += var_type.size;
                 break;
             }
         }
     }
 
-    auto ins = new InvokeJitInstruction(p_func, p_args);
+    auto ins = new InvokeJitInstruction(p_func, p_args, p_ret_var, total_size);
     return Ref<InvokeJitInstruction>::from_uninitialized_object(ins);
 }

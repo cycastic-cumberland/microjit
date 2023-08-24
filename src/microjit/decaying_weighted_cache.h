@@ -56,7 +56,7 @@ namespace microjit {
             return heap;
         }
     private:
-        _ALWAYS_INLINE_ void heapify(size_t idx, size_t n){
+        void heapify(size_t idx, size_t n){
             auto largest = idx;
             auto l = 2 * idx + 1;
             auto r = 2 * idx + 2;
