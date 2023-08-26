@@ -2,7 +2,7 @@
 // Created by cycastic on 8/21/23.
 //
 
-#include "compilation_agent.h"
+#include "runtime_agent.h"
 
 _NO_DISCARD_ static _ALWAYS_INLINE_ size_t get_time_us(){
     auto now = std::chrono::high_resolution_clock::now();
@@ -228,13 +228,15 @@ microjit::ThreadPoolCompilationHandler::compile_from_scratch(const microjit::Ref
 }
 
 bool microjit::ThreadPoolCompilationHandler::remove_function_internal(const void* p_host) {
-    // The choice to not remove the function_cache entry is deliberate
-    // Those entries are going to be handled by the garbage collector anyway
     WriteLockGuard guard(lock);
     if (function_map.find((size_t)(p_host)) == function_map.end()) return false;
     auto cb = function_map.at((size_t)p_host);
-    // Need not locking the runtime
-    runtime->get_asmjit_runtime().release(cb);
+    {
+        // Guarding the runtime since the compilation process is not dependent on the master lock
+        auto& asmjit_runtime = runtime->get_asmjit_runtime();
+        std::lock_guard<std::mutex> runtime_guard(runtime->get_mutex());
+        asmjit_runtime.release(cb);
+    }
     function_map.erase((size_t)p_host);
     return true;
 }

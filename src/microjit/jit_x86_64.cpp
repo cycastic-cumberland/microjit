@@ -12,14 +12,13 @@ static constexpr auto rbp = asmjit::x86::rbp;
 static constexpr auto rsp = asmjit::x86::rsp;
 static constexpr auto rdi = asmjit::x86::rdi;
 static constexpr auto rsi = asmjit::x86::rsi;
-static constexpr auto rdx = asmjit::x86::rdx;
-static constexpr auto rcx = asmjit::x86::rcx;
-static constexpr auto rbx = asmjit::x86::rbx;
 static constexpr auto rax = asmjit::x86::rax;
-static constexpr auto eax = asmjit::x86::eax;
-static constexpr auto ebx = asmjit::x86::ebx;
-static constexpr auto edi = asmjit::x86::edi;
-static constexpr auto esi = asmjit::x86::esi;
+static constexpr auto rbx = asmjit::x86::rbx;
+static constexpr auto rcx = asmjit::x86::rcx;
+static constexpr auto rdx = asmjit::x86::rdx;
+
+static constexpr auto xmm0 = asmjit::x86::xmm0;
+static constexpr auto xmm1 = asmjit::x86::xmm1;
 
 static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
@@ -175,6 +174,9 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                                                              copy_target_offset);
                             break;
                         }
+                        case Value::VAL_EXPRESSION: {
+                            copy_construct_atomic_expression(assembler, frame_report, as_cc);
+                        }
                     }
                     break;
                 }
@@ -204,6 +206,9 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                             assign_variable(assembler, as_assign, vstack_offset,
                                             copy_target_offset);
                             break;
+                        }
+                        case Value::VAL_EXPRESSION: {
+                            assign_atomic_expression(assembler, frame_report, as_assign);
                         }
                     }
                     break;
@@ -314,6 +319,8 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                                 AIN(assembler->call(type.copy_constructor));
                                 break;
                             }
+                            case Value::VAL_EXPRESSION:
+                                MJ_RAISE("Passing expression as argument is not supported. Evaluate them first.");
                         }
                     }
                     AIN(assembler->sub(asmjit::x86::r10, as_invocation->target_function->return_type.size));
@@ -363,6 +370,8 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                                 type = Box<Type>::make_box(as_var->variable->type);
                                 break;
                             }
+                            case Value::VAL_EXPRESSION:
+                                MJ_RAISE("I didn't think it was possible to reach this...");
                         }
                         AIN(assembler->sub(asmjit::x86::r10, type->size));
                         if (!type->is_primitive){
@@ -569,6 +578,550 @@ void microjit::MicroJITCompiler_x86_64::copy_immediate_internal(microjit::Box<as
 void microjit::MicroJITCompiler_x86_64::trampoline_caller(const std::function<void(microjit::VirtualStack*)> *p_trampoline,
                                                           microjit::VirtualStack *p_stack) {
     p_trampoline->operator()(p_stack);
+}
+
+void microjit::MicroJITCompiler_x86_64::assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                                 const Ref<StackFrameInfo>& p_frame_report,
+                                                                 const Ref<AssignInstruction> &p_instruction) {
+    auto as_expr = p_instruction->value_reference.c_style_cast<AbstractOperation>();
+    if (AbstractOperation::is_binary(as_expr->operation_type)){
+        auto as_binary_op = as_expr.c_style_cast<BinaryOperation>();
+        assign_binary_atomic_expression(assembler, p_frame_report, p_instruction->target_variable, as_binary_op);
+    } else {
+        MJ_RAISE("Unary operations are yet to be support this");
+    }
+}
+
+void
+microjit::MicroJITCompiler_x86_64::copy_construct_atomic_expression(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                                    const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_report,
+                                                                    const microjit::Ref<microjit::CopyConstructInstruction> &p_instruction) {
+    auto as_expr = p_instruction->value_reference.c_style_cast<AbstractOperation>();
+    if (AbstractOperation::is_binary(as_expr->operation_type)){
+        auto as_binary_op = as_expr.c_style_cast<BinaryOperation>();
+        assign_binary_atomic_expression(assembler, p_frame_report, p_instruction->target_variable, as_binary_op);
+    } else {
+        MJ_RAISE("Unary operations are yet to be support this");
+    }
+}
+
+void
+microjit::MicroJITCompiler_x86_64::assign_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                                   const Ref<StackFrameInfo>& p_frame_report,
+                                                                   const Ref<VariableInstruction> &p_target_var,
+                                                                   const microjit::Ref<microjit::BinaryOperation> &p_binary) {
+    if (p_binary->is_primitive){
+        auto as_primitive_binary_op = p_binary.c_style_cast<PrimitiveBinaryOperation>();
+        assign_primitive_binary_atomic_expression(assembler, p_frame_report, p_target_var, as_primitive_binary_op);
+    } else {
+        MJ_RAISE("Non-primitive binary operations are yet to be support this");
+    }
+}
+
+// DO NOT CHANGE THESE
+#define PRIMITIVE_EXPRESSION_LEFT_INTEGER a
+#define PRIMITIVE_EXPRESSION_RIGHT_INTEGER b
+#define PE_BUFFER rcx
+#define PRIMITIVE_EXPRESSION_LEFT_FP 1
+#define PRIMITIVE_EXPRESSION_RIGHT_FP 2
+
+#define REP_FP(m_type) asmjit::x86::xmm##m_type
+#define REP_U8(m_type) asmjit::x86::m_type##l
+#define REP_U16(m_type) asmjit::x86::m_type##x
+#define REP_U32(m_type) asmjit::x86::e##m_type##x
+#define REP_U64(m_type) asmjit::x86::r##m_type##x
+
+#define MOVE_PRIMITIVE_OPERAND(m_target_type, m_is_float, m_operand, m_float_type, m_int_type)          \
+{                                                                                                       \
+    static constexpr auto float_type = Type::create<float>();                                           \
+    if (m_is_float) {                                                                                   \
+        const auto is_fp32 = (m_target_type == float_type);                                             \
+        switch (m_operand->get_value_type()) {                                                          \
+            case Value::VAL_IMMEDIATE: {                                                                \
+                auto as_imm = m_operand.c_style_cast<ImmediateValue>();                                 \
+                if (is_fp32){                                                                           \
+                    auto as_integer = *(uint32_t*)as_imm->data;                                         \
+                    AIN(assembler->push(as_integer));                                                   \
+                    AIN(assembler->lea(PE_BUFFER, asmjit::x86::dword_ptr(rsp)));                        \
+                    AIN(assembler->movss(REP_FP(m_float_type), asmjit::x86::dword_ptr(PE_BUFFER)));     \
+                    AIN(assembler->pop(asmjit::x86::eax));                                              \
+                } else {                                                                                \
+                    auto as_integer = *(uint64_t*)as_imm->data;                                         \
+                    AIN(assembler->push(as_integer));                                                   \
+                    AIN(assembler->lea(PE_BUFFER, asmjit::x86::qword_ptr(rsp)));                        \
+                    AIN(assembler->movsd(REP_FP(m_float_type), asmjit::x86::qword_ptr(PE_BUFFER)));     \
+                    AIN(assembler->pop(asmjit::x86::PE_BUFFER));                                        \
+                }                                                                                       \
+            break;                                                                                      \
+            }                                                                                           \
+            case Value::VAL_VARIABLE: {                                                                 \
+                auto as_var = m_operand.c_style_cast<VariableValue>();                                  \
+                auto curr_var = as_var->variable;                                                       \
+                auto curr_vstack_offset = p_frame_report->variable_map.at(curr_var);                    \
+                AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));                                       \
+                AIN(assembler->sub(asmjit::x86::r10, std::abs(curr_vstack_offset)));                    \
+                if (is_fp32){                                                                           \
+                    AIN(assembler->lea(rax, asmjit::x86::dword_ptr(asmjit::x86::r10)));                 \
+                    AIN(assembler->movss(REP_FP(m_float_type), asmjit::x86::dword_ptr(rax)));           \
+                } else {                                                                                \
+                    AIN(assembler->lea(rax, asmjit::x86::qword_ptr(asmjit::x86::r10)));                 \
+                    AIN(assembler->movsd(REP_FP(m_float_type), asmjit::x86::qword_ptr(rax)));           \
+                }                                                                                       \
+                break;                                                                                  \
+            }                                                                                           \
+            case Value::VAL_ARGUMENT:                                                                   \
+            case Value::VAL_EXPRESSION:                                                                 \
+                MJ_RAISE("Unsupported primitive binary operation");                                     \
+        }                                                                                               \
+    } else {                                                                                            \
+        switch (m_operand->get_value_type()) {                                                          \
+            case Value::VAL_IMMEDIATE: {                                                                \
+                auto as_imm = m_operand.c_style_cast<ImmediateValue>();                                 \
+                const auto* data = as_imm->data;                                                        \
+                switch (m_target_type.size) {                                                           \
+                    case 1:                                                                             \
+                        AIN(assembler->mov(REP_U8(m_int_type), *(uint8_t*)data));                       \
+                        break;                                                                          \
+                    case 2:                                                                             \
+                        AIN(assembler->mov(REP_U16(m_int_type), *(uint16_t*)data));                     \
+                        break;                                                                          \
+                    case 4:                                                                             \
+                        AIN(assembler->mov(REP_U32(m_int_type), *(uint32_t*)data));                     \
+                        break;                                                                          \
+                    case 8:                                                                             \
+                        AIN(assembler->mov(REP_U64(m_int_type), *(uint64_t*)data));                     \
+                        break;                                                                          \
+                    default:                                                                            \
+                        MJ_RAISE("Unsupported integer size");                                           \
+                }                                                                                       \
+                break;                                                                                  \
+            }                                                                                           \
+        case Value::VAL_VARIABLE: {                                                                     \
+            auto as_var = m_operand.c_style_cast<VariableValue>();                                      \
+            auto curr_var = as_var->variable;                                                           \
+            auto curr_vstack_offset = p_frame_report->variable_map.at(curr_var);                        \
+            AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));                                           \
+            AIN(assembler->sub(asmjit::x86::r10, std::abs(curr_vstack_offset)));                        \
+            switch (m_target_type.size) {                                                               \
+                case 1:                                                                                 \
+                    AIN(assembler->mov(REP_U8(m_int_type), asmjit::x86::byte_ptr(asmjit::x86::r10)));   \
+                    break;                                                                              \
+                case 2:                                                                                 \
+                    AIN(assembler->mov(REP_U16(m_int_type), asmjit::x86::word_ptr(asmjit::x86::r10)));  \
+                    break;                                                                              \
+                case 4:                                                                                 \
+                    AIN(assembler->mov(REP_U32(m_int_type), asmjit::x86::dword_ptr(asmjit::x86::r10))); \
+                    break;                                                                              \
+                case 8:                                                                                 \
+                    AIN(assembler->mov(REP_U64(m_int_type), asmjit::x86::qword_ptr(asmjit::x86::r10))); \
+                    break;                                                                              \
+                default:                                                                                \
+                    MJ_RAISE("Unsupported integer size");                                               \
+            }                                                                                           \
+            break;                                                                                      \
+        }                                                                                               \
+        case Value::VAL_ARGUMENT:                                                                       \
+        case Value::VAL_EXPRESSION:                                                                     \
+            MJ_RAISE("Unsupported primitive binary operation");                                         \
+        }                                                                                               \
+    }                                                                                                   \
+}
+
+#define INTEGER_ARITHMETIC_HELPER(m_left, m_right, m_op, m_size)            \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 1:                                                             \
+            AIN(assembler->m_op(REP_U8(m_left), REP_U8(m_right)));          \
+            break;                                                          \
+        case 2:                                                             \
+            AIN(assembler->m_op(REP_U16(m_left), REP_U16(m_right)));        \
+            break;                                                          \
+        case 4:                                                             \
+            AIN(assembler->m_op(REP_U32(m_left), REP_U32(m_right)));        \
+            break;                                                          \
+        case 8:                                                             \
+            AIN(assembler->m_op(REP_U64(m_left), REP_U64(m_right)));        \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported");                                        \
+    }                                                                       \
+}
+
+#define INTEGER_COMPARISON_HELPER(m_left, m_right, m_op, m_size)            \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 1:                                                             \
+            AIN(assembler->cmp(REP_U8(m_left), REP_U8(m_right)));           \
+            break;                                                          \
+        case 2:                                                             \
+            AIN(assembler->cmp(REP_U16(m_left), REP_U16(m_right)));         \
+            break;                                                          \
+        case 4:                                                             \
+            AIN(assembler->cmp(REP_U32(m_left), REP_U32(m_right)));         \
+            break;                                                          \
+        case 8:                                                             \
+            AIN(assembler->cmp(REP_U64(m_left), REP_U64(m_right)));         \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported");                                        \
+    }                                                                       \
+    AIN(assembler->m_op(REP_U8(m_left)));                                   \
+}
+
+#define INTEGER_SAVE(m_address, m_storage, m_size)                          \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 1:                                                             \
+            AIN(assembler->mov(asmjit::x86::byte_ptr(m_address),            \
+                REP_U8(m_storage)));                                        \
+            break;                                                          \
+        case 2:                                                             \
+            AIN(assembler->mov(asmjit::x86::word_ptr(m_address),            \
+                REP_U16(m_storage)));                                       \
+            break;                                                          \
+        case 4:                                                             \
+            AIN(assembler->mov(asmjit::x86::dword_ptr(m_address),           \
+                REP_U32(m_storage)));                                       \
+            break;                                                          \
+        case 8:                                                             \
+            AIN(assembler->mov(asmjit::x86::qword_ptr(m_address),           \
+                REP_U64(m_storage)));                                       \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported");                                        \
+    }                                                                       \
+}
+
+#define INTEGER_DIV(m_divisor, m_size, m_op)                                \
+{                                                                           \
+    AIN(assembler->xor_(rdx, rdx));                                         \
+    switch ((m_size)) {                                                     \
+        case 1:                                                             \
+            AIN(assembler->m_op(REP_U8(m_divisor)));                        \
+            break;                                                          \
+        case 2:                                                             \
+            AIN(assembler->m_op(REP_U16(m_divisor)));                       \
+            break;                                                          \
+        case 4:                                                             \
+            AIN(assembler->m_op(REP_U32(m_divisor)));                       \
+            break;                                                          \
+        case 8:                                                             \
+            AIN(assembler->m_op(REP_U64(m_divisor)));                       \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported");                                        \
+    }\
+}
+#define FLOATING_POINT_ARITHMETIC_HELPER(m_left, m_right, m_op, m_size)     \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 4:                                                             \
+            AIN(assembler->m_op##ss(REP_FP(m_left), REP_FP(m_right)));      \
+            break;                                                          \
+        case 8:                                                             \
+            AIN(assembler->m_op##sd(REP_FP(m_left), REP_FP(m_right)));      \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported floating point precision");               \
+    }                                                                       \
+}
+
+#define FLOATING_POINT_SAVE(m_address, m_storage, m_size)                   \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 4:                                                             \
+            AIN(assembler->movss(dword_ptr(m_address), REP_FP(m_storage))); \
+            break;                                                          \
+        case 8:                                                             \
+            AIN(assembler->movsd(qword_ptr(m_address), REP_FP(m_storage))); \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported floating point precision");               \
+    }                                                                       \
+}
+
+#define FLOATING_POINT_EQU_CMP(m_left, m_right, m_precision)                \
+AIN(assembler->ucomi##m_precision(REP_FP(m_left), REP_FP(m_right)))
+
+#define FLOATING_POINT_BASE_CMP(m_left, m_right, m_precision)               \
+AIN(assembler->comi##m_precision(REP_FP(m_left), REP_FP(m_right)))
+
+#define FLOATING_POINT_CMP_EQUAL(m_left, m_right, m_size, m_buf, m_first)   \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 4:                                                             \
+            FLOATING_POINT_EQU_CMP(m_left, m_right, ss);                    \
+            AIN(assembler->m_first(asmjit::x86::al));                       \
+            AIN(assembler->mov(asmjit::x86::edx, (m_buf)));                 \
+            FLOATING_POINT_EQU_CMP(m_left, m_right, ss);                    \
+            AIN(assembler->cmovne(asmjit::x86::eax,                         \
+                                  asmjit::x86::edx));                       \
+            break;                                                          \
+        case 8:                                                             \
+            FLOATING_POINT_EQU_CMP(m_left, m_right, sd);                    \
+            AIN(assembler->m_first(asmjit::x86::al));                       \
+            AIN(assembler->mov(asmjit::x86::edx, (m_buf)));                 \
+            FLOATING_POINT_EQU_CMP(m_left, m_right, sd);                    \
+            AIN(assembler->cmovne(asmjit::x86::eax,                         \
+                                  asmjit::x86::edx));                       \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported floating point precision");               \
+    }                                                                       \
+}
+
+#define FLOATING_POINT_CMP_OTHER(m_left, m_right, m_size, m_cmp)            \
+{                                                                           \
+    switch ((m_size)) {                                                     \
+        case 4:                                                             \
+            FLOATING_POINT_BASE_CMP(m_left, m_right, ss);                   \
+            AIN(assembler->m_cmp(asmjit::x86::al));                         \
+            break;                                                          \
+        case 8:                                                             \
+            FLOATING_POINT_BASE_CMP(m_left, m_right, sd);                   \
+            AIN(assembler->m_cmp(asmjit::x86::al));                         \
+            break;                                                          \
+        default:                                                            \
+            MJ_RAISE("Unsupported floating point precision");               \
+    }                                                                       \
+}
+static void integer_arithmetic(microjit::Box<asmjit::x86::Assembler> &assembler,
+                               microjit::AbstractOperation::OperationType p_op,
+                               microjit::Type p_operand_type){
+    auto data_size = p_operand_type.size;
+    switch (p_op) {
+        case microjit::AbstractOperation::BINARY_ADD:
+            INTEGER_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                      PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                      add, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_SUB:
+            INTEGER_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                      PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                      sub, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_MUL:
+            INTEGER_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                      PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                      imul, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_DIV:
+        case microjit::AbstractOperation::BINARY_MOD: {
+            if (microjit::Type::is_signed_integer(p_operand_type))
+                INTEGER_DIV(PRIMITIVE_EXPRESSION_RIGHT_INTEGER, data_size, idiv)
+            else INTEGER_DIV(PRIMITIVE_EXPRESSION_RIGHT_INTEGER, data_size, div)
+
+            if (p_op == microjit::AbstractOperation::BINARY_DIV) break;
+            // If is modulo, move rdx to rax
+            AIN(assembler->mov(rax, rdx));
+            break;
+        }
+        default:
+            MJ_RAISE("Unsupported");
+    }
+//    INTEGER_MOVE(PRIMITIVE_EXPRESSION_LEFT_INTEGER, PRIMITIVE_EXPRESSION_RETURN_INTEGER, data_size)
+}
+
+static void integer_comparison(microjit::Box<asmjit::x86::Assembler> &assembler,
+                               microjit::AbstractOperation::OperationType p_op,
+                               microjit::Type p_operand_type) {
+    auto data_size = p_operand_type.size;
+    auto is_signed = microjit::Type::is_signed_integer(p_operand_type);
+    switch (p_op) {
+        case microjit::AbstractOperation::BINARY_EQUAL:
+            INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                      PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                      sete, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_NOT_EQUAL:
+            INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                      PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                      setne, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_GREATER:
+            if (is_signed)
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setg, data_size)
+            else
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          seta, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_GREATER_EQ:
+            if (is_signed)
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setge, data_size)
+            else
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setnb, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_LESSER:
+            if (is_signed)
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setl, data_size)
+            else
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setb, data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_LESSER_EQ:
+            if (is_signed)
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setle, data_size)
+            else
+                INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
+                                          PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
+                                          setna, data_size)
+            break;
+        default:
+            MJ_RAISE("Unsupported operation");
+    }
+}
+
+static void floating_point_arithmetic(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                      microjit::AbstractOperation::OperationType p_op,
+                                      size_t p_data_size){
+    switch (p_op) {
+        case microjit::AbstractOperation::BINARY_ADD:
+            FLOATING_POINT_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                             PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                             add, p_data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_SUB:
+            FLOATING_POINT_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                             PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                             sub, p_data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_MUL:
+            FLOATING_POINT_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                             PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                             mul, p_data_size)
+            break;
+        case microjit::AbstractOperation::BINARY_DIV:
+            FLOATING_POINT_ARITHMETIC_HELPER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                             PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                             div, p_data_size)
+            break;
+        default:
+            MJ_RAISE("Unsupported");
+    }
+//    FLOATING_POINT_MOVE(PRIMITIVE_EXPRESSION_LEFT_FP, PRIMITIVE_EXPRESSION_RETURN_FP, p_data_size)
+}
+
+static void floating_point_comparison(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                      microjit::AbstractOperation::OperationType p_op,
+                                      size_t p_data_size) {
+
+    switch (p_op) {
+        case microjit::AbstractOperation::BINARY_EQUAL: {
+            FLOATING_POINT_CMP_EQUAL(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                     PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                     p_data_size, 0, setnp)
+            break;
+        }
+        case microjit::AbstractOperation::BINARY_NOT_EQUAL: {
+            FLOATING_POINT_CMP_EQUAL(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                     PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                     p_data_size, 1, setp)
+            break;
+        }
+        case microjit::AbstractOperation::BINARY_GREATER: {
+            FLOATING_POINT_CMP_OTHER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                     PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                     p_data_size, seta)
+            break;
+        }
+        case microjit::AbstractOperation::BINARY_GREATER_EQ: {
+            FLOATING_POINT_CMP_OTHER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                     PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                     p_data_size, setnb)
+            break;
+        }
+        case microjit::AbstractOperation::BINARY_LESSER: {
+            FLOATING_POINT_CMP_OTHER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                     PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                     p_data_size, setb)
+            break;
+        }
+        case microjit::AbstractOperation::BINARY_LESSER_EQ: {
+            FLOATING_POINT_CMP_OTHER(PRIMITIVE_EXPRESSION_LEFT_FP,
+                                     PRIMITIVE_EXPRESSION_RIGHT_FP,
+                                     p_data_size, setna)
+            break;
+        }
+        default:
+            MJ_RAISE("Unsupported operation");
+    }
+}
+
+void microjit::MicroJITCompiler_x86_64::assign_primitive_binary_atomic_expression(
+        Box<asmjit::x86::Assembler> &assembler,
+        const Ref<StackFrameInfo>& p_frame_report,
+        const Ref<VariableInstruction> &p_target_var,
+        const microjit::Ref<microjit::PrimitiveBinaryOperation> &p_primitive_binary) {
+
+    auto left_operand = p_primitive_binary->left_operand;
+    auto right_operand = p_primitive_binary->right_operand;
+    Box<Type> operand_type_boxed{};
+    bool is_operand_floating_point{};
+    switch (left_operand->get_value_type()) {
+        case Value::VAL_IMMEDIATE: {
+            auto as_imm = left_operand.c_style_cast<ImmediateValue>();
+            auto type = as_imm->imm_type;
+            is_operand_floating_point = Type::is_floating_point(type);
+            operand_type_boxed = Box<Type>::make_box(type);
+            break;
+        }
+        case Value::VAL_VARIABLE: {
+            auto as_var = left_operand.c_style_cast<VariableValue>();
+            auto type = as_var->variable->type;
+            is_operand_floating_point = Type::is_floating_point(type);
+            operand_type_boxed = Box<Type>::make_box(type);
+            break;
+        }
+        case Value::VAL_ARGUMENT:
+        case Value::VAL_EXPRESSION:
+            MJ_RAISE("Unsupported");
+    }
+    const auto operand_type = *(operand_type_boxed.ptr());
+    const auto operation_type = p_primitive_binary->operation_type;
+
+    // Move the left operand into the first register
+    MOVE_PRIMITIVE_OPERAND(operand_type, is_operand_floating_point, left_operand,
+                           PRIMITIVE_EXPRESSION_LEFT_FP, PRIMITIVE_EXPRESSION_LEFT_INTEGER);
+
+    // Move the second operand into the second register
+    MOVE_PRIMITIVE_OPERAND(operand_type, is_operand_floating_point, right_operand,
+                           PRIMITIVE_EXPRESSION_RIGHT_FP, PRIMITIVE_EXPRESSION_RIGHT_INTEGER);
+
+    auto target_vstack_offset = p_frame_report->variable_map.at(p_target_var);
+    AIN(assembler->mov(PE_BUFFER, LOAD_VRBP));
+    AIN(assembler->sub(PE_BUFFER, std::abs(target_vstack_offset)));
+    // Calculate the stuff
+    if (AbstractOperation::operation_return_same(operation_type)){
+        if (is_operand_floating_point) {
+            floating_point_arithmetic(assembler, operation_type, operand_type.size);
+            FLOATING_POINT_SAVE(PE_BUFFER, PRIMITIVE_EXPRESSION_LEFT_FP, operand_type.size)
+        } else {
+            auto is_signed = Type::is_signed_integer(operand_type);
+            integer_arithmetic(assembler, operation_type, operand_type);
+            INTEGER_SAVE(PE_BUFFER, PRIMITIVE_EXPRESSION_LEFT_INTEGER, operand_type.size)
+        }
+    } else if (AbstractOperation::operation_return_bool(operation_type)) {
+        if (is_operand_floating_point) {
+            floating_point_comparison(assembler, operation_type, operand_type.size);
+            AIN(assembler->mov(asmjit::x86::byte_ptr(PE_BUFFER), asmjit::x86::al));
+        } else {
+            integer_comparison(assembler, operation_type, operand_type);
+            AIN(assembler->mov(asmjit::x86::byte_ptr(PE_BUFFER), asmjit::x86::al));
+        }
+    } else
+        MJ_RAISE("Unsupported operation");
 }
 
 #undef VAR_COPY

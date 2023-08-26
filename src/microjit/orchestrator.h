@@ -5,11 +5,10 @@
 #ifndef MICROJIT_ORCHESTRATOR_H
 #define MICROJIT_ORCHESTRATOR_H
 
-#include <stdexcept>
 #include "instructions.h"
 #include "utils.h"
 #include "thread_pool.h"
-#include "compilation_agent.h"
+#include "runtime_agent.h"
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include "jit_x86_64.h"
@@ -20,15 +19,15 @@ namespace microjit {
         size_t vstack_default_size = 1024 * 1024 * 8;
         size_t vstack_buffer_size = 128;
     };
-    template<class CompilerTy, class RefCounter = ThreadSafeObject>
-    class OrchestratorComponent : public RefCounter {
+    template<class TCompiler, class TRefCounter = ThreadSafeObject>
+    class OrchestratorComponent : public TRefCounter {
     public:
         typedef void(*VirtualStackFunction)(VirtualStack*);
 
         template<typename R, typename ...Args>
-        struct FunctionInstance : public RefCounter {
+        struct FunctionInstance : public TRefCounter {
         private:
-            typedef OrchestratorComponent<CompilerTy, RefCounter> Host;
+            typedef OrchestratorComponent<TCompiler, TRefCounter> Host;
         private:
             const OrchestratorComponent* parent;
             const Ref<Function<R, Args...>> function;
@@ -97,7 +96,7 @@ namespace microjit {
             _ALWAYS_INLINE_ R call_with_vstack(VirtualStack* p_stack, Args&&... args) const {
                 return instance->call_with_vstack(p_stack, std::forward<Args>(args)...);
             }
-            _ALWAYS_INLINE_ R operator()(Args&&... args) const {
+            _ALWAYS_INLINE_ R operator()(Args... args) const {
                 return call(std::forward<Args>(args)...);
             }
         };
@@ -117,11 +116,11 @@ namespace microjit {
 
         const InstanceHub hub;
         VirtualStackSettings settings;
-        Ref<CompilerTy> compiler{};
+        Ref<TCompiler> compiler{};
         Ref<MicroJITRuntime> runtime{};
-        CompilationAgent<CompilerTy> agent;
+        RuntimeAgent<TCompiler> agent;
 
-        std::unordered_map<size_t, Ref<RefCounter>> instance_map{};
+        std::unordered_map<size_t, Ref<TRefCounter>> instance_map{};
     private:
         const VirtualStackSettings& get_settings() const { return settings; }
         MicroJITCompiler::CompilationResult compile(const Ref<RectifiedFunction>& p_func) {
@@ -136,7 +135,7 @@ namespace microjit {
         template<typename R, typename ...Args>
         _ALWAYS_INLINE_ InstanceWrapper<R, Args...> create_instance_internal() {
             auto instance = Ref<FunctionInstance<R, Args...>>::make_ref(this);
-            instance_map[(size_t)(instance.ptr())] = instance.template c_style_cast<RefCounter>();
+            instance_map[(size_t)(instance.ptr())] = instance.template c_style_cast<TRefCounter>();
             return InstanceWrapper<R, Args...>(instance);
         }
         void rectified_detach_instance(const void* p_instance, const void* p_func){
@@ -158,7 +157,7 @@ namespace microjit {
         explicit OrchestratorComponent(const CompilationAgentSettings& p_settings)
             : hub(this), agent(p_settings) {
             runtime = Ref<MicroJITRuntime>::make_ref();
-            compiler = Ref<CompilerTy>::make_ref(runtime);
+            compiler = Ref<TCompiler>::make_ref(runtime);
         }
         OrchestratorComponent(): OrchestratorComponent(agent_settings) {}
         template<typename R, typename ...Args>

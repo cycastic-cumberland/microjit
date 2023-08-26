@@ -8,8 +8,10 @@
 #if defined(__clang__) || defined(_MSC_VER)
 #define USE_TYPE_CONSTEXPR
 #define TYPE_CONSTEXPR constexpr
+#define TYPE_ASSERT(m_expr) static_assert((m_expr))
 #else
 #define TYPE_CONSTEXPR
+#define TYPE_ASSERT(m_expr) if (!(m_expr)) MJ_RAISE("Assertion failed")
 #endif
 #ifndef _ALWAYS_INLINE_
 #if defined(__GNUC__)

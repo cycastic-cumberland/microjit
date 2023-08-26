@@ -43,9 +43,9 @@ add_library(microjit
         src/microjit/priority_queue.h
         src/microjit/managed_thread.h
         src/microjit/managed_thread.cpp
-        src/microjit/compilation_agent.h
+        src/microjit/runtime_agent.h
         src/microjit/command_queue.h
-        src/microjit/compilation_agent.cpp
+        src/microjit/runtime_agent.cpp
         src/microjit/decaying_weighted_cache.h
 )
 

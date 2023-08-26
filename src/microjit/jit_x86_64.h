@@ -24,6 +24,8 @@
 #define AIN(m_action) m_action
 #endif
 
+
+
 namespace microjit {
     class MicroJITCompiler_x86_64 : public MicroJITCompiler {
     private:
@@ -65,6 +67,20 @@ namespace microjit {
                                                  const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
                                                  const microjit::MicroJITCompiler_x86_64::ScopeInfo &p_current_scope);
         static void trampoline_caller(const std::function<void(microjit::VirtualStack*)>* p_trampoline, VirtualStack* p_stack);
+        static void assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                             const Ref<StackFrameInfo>& p_frame_report,
+                                             const Ref<AssignInstruction> &p_instruction);
+        static void copy_construct_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                     const Ref<StackFrameInfo>& p_frame_report,
+                                                     const Ref<CopyConstructInstruction> &p_instruction);
+        static void assign_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                    const Ref<StackFrameInfo>& p_frame_report,
+                                                    const Ref<VariableInstruction> &p_target_var,
+                                                    const Ref<BinaryOperation> &p_binary);
+        static void assign_primitive_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                              const Ref<StackFrameInfo>& p_frame_report,
+                                                              const Ref<VariableInstruction> &p_instruction,
+                                                              const Ref<PrimitiveBinaryOperation> &p_primitive_binary);
     protected:
         CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const override;
     public:

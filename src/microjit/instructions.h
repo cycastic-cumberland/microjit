@@ -44,6 +44,17 @@ namespace microjit {
         static void empty_ctor(void*) {  }
         static void empty_copy_ctor(void*, void*) {  }
         static void empty_dtor(void*) {  }
+
+        template<typename T>
+        static void add(T* p_re, const T* p_left, const T* p_right) { *p_re = *p_left + *p_right; }
+        template<typename T>
+        static void sub(T* p_re, const T* p_left, const T* p_right) { *p_re = *p_left - *p_right; }
+        template<typename T>
+        static void mul(T* p_re, const T* p_left, const T* p_right) { *p_re = *p_left * *p_right; }
+        template<typename T>
+        static void div(T* p_re, const T* p_left, const T* p_right) { *p_re = *p_left / *p_right; }
+        template<typename T>
+        static void mod(T* p_re, const T* p_left, const T* p_right) { *p_re = *p_left % *p_right; }
     };
     struct Type {
         const std::type_info *type_info;
@@ -92,6 +103,21 @@ namespace microjit {
             TYPE_CONSTEXPR T (*f)() = nullptr;
             return create_internal(f);
         }
+        static bool is_floating_point(Type p_type) {
+            TYPE_CONSTEXPR auto float_type = Type::create<float>();
+            TYPE_CONSTEXPR auto double_type = Type::create<double>();
+            return (p_type == float_type || p_type == double_type);
+        }
+        static bool is_signed_integer(Type p_type) {
+            TYPE_CONSTEXPR auto i8 = Type::create<int8_t>();
+            TYPE_CONSTEXPR auto i16 = Type::create<int16_t>();
+            TYPE_CONSTEXPR auto i32 = Type::create<int32_t>();
+            TYPE_CONSTEXPR auto i64 = Type::create<int64_t>();
+            return (p_type == i8) ||
+                   (p_type == i16) ||
+                   (p_type == i32) ||
+                   (p_type == i64);
+        }
     };
     template <typename R, typename ...Args> class Function;
     template <typename R, typename ...Args> class Scope;
@@ -114,6 +140,7 @@ namespace microjit {
             IT_INVOKE_JIT,
             IT_INVOKE_NATIVE,
             IT_INVOKE_PREPACKED_NATIVE,
+            IT_OPERATION,
         };
     private:
         const InstructionType type;
@@ -133,6 +160,7 @@ namespace microjit {
             VAL_IMMEDIATE,
             VAL_ARGUMENT,
             VAL_VARIABLE,
+            VAL_EXPRESSION,
         };
     private:
         const ValueType type;
@@ -149,13 +177,16 @@ namespace microjit {
     private:
         template<typename T>
         _ALWAYS_INLINE_ void add_arg(){
-            arg_types.push_back(Type::create<T>());
+            static TYPE_CONSTEXPR auto void_type = Type::create<void>();
+            static TYPE_CONSTEXPR auto curr_type = Type::create<T>();
+            TYPE_ASSERT(void_type != curr_type);
+            arg_types.push_back(curr_type);
         }
         void create_indexes(){
             offsets.resize(arg_types.size());
             size_t current_offset = 0;
             // The stack growth downward
-            for (int64_t i = offsets.size() - 1; i >= 0; i--){
+            for (int64_t i = int64_t(offsets.size()) - 1; i >= 0; i--){
                 offsets[i] = current_offset;
                 current_offset += arg_types[i].size;
             }
@@ -173,6 +204,8 @@ namespace microjit {
             return Ref<ArgumentsDeclaration>::from_uninitialized_object(args);
         }
     };
+
+    class VariableValue;
 
     class VariableInstruction : public Instruction {
     public:
@@ -193,6 +226,7 @@ namespace microjit {
             return Ref<VariableInstruction>::from_uninitialized_object(
                     new VariableInstruction(p_scope, Type::create<T>(), p_props));
         }
+        Ref<VariableValue> value_reference() const;
 
     };
 
@@ -256,70 +290,6 @@ namespace microjit {
             static TYPE_CONSTEXPR auto type = Type::create<T>();
             if (type != p_target->type) MJ_RAISE("Mismatched type");
             return create_unsafe<T>(p_target);
-        }
-    };
-    class CopyConstructInstruction : public Instruction {
-    public:
-        const Ref<VariableInstruction> target_variable;
-        const Ref<Value> value_reference;
-        void const* ctor; // void (*)(void*, const void*)
-    private:
-        CopyConstructInstruction(const Ref<VariableInstruction>& p_target, const Ref<Value>& p_val, void const* p_ctor)
-            : Instruction(IT_COPY_CONSTRUCT), target_variable(p_target), value_reference(p_val), ctor(p_ctor){}
-    public:
-        // This method don't have an unsafe equivalent as it's constructor is saved in its Type data
-        template<typename T>
-        static Ref<CopyConstructInstruction> create_imm(const Ref<VariableInstruction>& p_target, const T& p_value){
-            auto imm = ImmediateValue::create(p_value);
-            if (imm->imm_type != p_target->type) MJ_RAISE("Mismatched type");
-            auto as_value = imm.template c_style_cast<Value>();
-            auto ins = new CopyConstructInstruction(p_target, as_value, (const void*)p_target->type.copy_constructor);
-            return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
-        }
-        static Ref<CopyConstructInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_arg_idx);
-        static Ref<CopyConstructInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target);
-    };
-    class AssignInstruction : public Instruction {
-    public:
-        const Ref<VariableInstruction> target_variable;
-        const Ref<Value> value_reference;
-        void const* ctor; // void (*)(void*, const void*)
-    private:
-        AssignInstruction(const Ref<VariableInstruction>& p_target, const Ref<Value>& p_val, void const* p_ctor)
-                : Instruction(IT_ASSIGN), target_variable(p_target), value_reference(p_val), ctor(p_ctor){}
-    public:
-        template<typename T>
-        static Ref<AssignInstruction> create_imm_unsafe(const Ref<VariableInstruction>& p_target, const T& p_value) {
-            auto imm = ImmediateValue::create(p_value).template c_style_cast<Value>();
-            auto ins = new AssignInstruction(p_target, imm, (const void*)ObjectTools::assign<T>);
-            return Ref<AssignInstruction>::from_uninitialized_object(ins);
-        }
-        template<typename T>
-        static Ref<AssignInstruction> create_imm(const Ref<VariableInstruction>& p_target, const T& p_value) {
-            static TYPE_CONSTEXPR auto type = Type::create<T>();
-            if (type != p_target->type) MJ_RAISE("Mismatched type");
-            return create_imm_unsafe(p_target, p_value);
-        }
-        template<typename T>
-        static Ref<AssignInstruction> create_arg_unsafe(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx);
-        template<typename T>
-        static Ref<AssignInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx){
-            static TYPE_CONSTEXPR auto type = Type::create<T>();
-            if (type != p_target->type) MJ_RAISE("Mismatched type");
-            return create_arg_unsafe<T>(p_scope, p_target, p_idx);
-        }
-        template<typename T>
-        static Ref<AssignInstruction> create_var_unsafe(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
-            if (p_target->type != p_assign_target->type) MJ_RAISE("Mismatched type");
-            auto var = VariableValue::create(p_assign_target).c_style_cast<Value>();
-            auto ins = new AssignInstruction(p_target, var, (const void*)ObjectTools::assign<T>);
-            return Ref<AssignInstruction>::from_uninitialized_object(ins);
-        }
-        template<typename T>
-        static Ref<AssignInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
-            static TYPE_CONSTEXPR auto type = Type::create<T>();
-            if (type != p_target->type) MJ_RAISE("Mismatched type");
-            return create_var_unsafe<T>(p_target, p_assign_target);
         }
     };
 
@@ -398,6 +368,227 @@ namespace microjit {
                                                 const Ref<VariableInstruction>& p_ret_var);
     };
 
+    class ExpressionValue;
+
+    class AbstractOperation : public Value {
+    public:
+        enum OperationType {
+            BINARY_ADD,
+            BINARY_SUB,
+            BINARY_MUL,
+            BINARY_DIV,
+            BINARY_MOD,
+
+            BINARY_EQUAL,
+            BINARY_NOT_EQUAL,
+            BINARY_GREATER,
+            BINARY_GREATER_EQ,
+            BINARY_LESSER,
+            BINARY_LESSER_EQ,
+
+            BINARY_END,
+
+            UNARY_COMPOUND_ADD,
+            UNARY_COMPOUND_SUB,
+            UNARY_COMPOUND_MUL,
+            UNARY_COMPOUND_DIV,
+            UNARY_COMPOUND_MOD,
+
+            OP_END,
+        };
+        enum OperationMask : uint32_t {
+            RET_SAME_TYPE = 1,
+            RET_BOOLEAN = 2,
+            RET_NONE = 4,
+            READ_ONLY = 8,
+        };
+        static constexpr uint32_t operation_masks[OP_END] {
+                RET_SAME_TYPE | READ_ONLY,
+                RET_SAME_TYPE | READ_ONLY,
+                RET_SAME_TYPE | READ_ONLY,
+                RET_SAME_TYPE | READ_ONLY,
+                RET_SAME_TYPE | READ_ONLY,
+
+                RET_BOOLEAN | READ_ONLY,
+                RET_BOOLEAN | READ_ONLY,
+                RET_BOOLEAN | READ_ONLY,
+                RET_BOOLEAN | READ_ONLY,
+                RET_BOOLEAN | READ_ONLY,
+                RET_BOOLEAN | READ_ONLY,
+
+                RET_NONE, // BINARY_END
+
+                RET_NONE,
+                RET_NONE,
+                RET_NONE,
+                RET_NONE,
+                RET_NONE,
+        };
+        const OperationType operation_type;
+    protected:
+        explicit AbstractOperation(OperationType p_type)
+            : Value(VAL_EXPRESSION), operation_type(p_type) {}
+    public:
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool is_binary(OperationType p_op) {
+            return p_op < BINARY_END;
+        }
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool is_unary(OperationType p_op) {
+            return p_op > BINARY_END && p_op < OP_END;
+        }
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool is_operation_read_only(OperationType p_op) {
+            return  (operation_masks[p_op] & READ_ONLY);
+        }
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool operation_does_return(OperationType p_op) {
+            return !(operation_masks[p_op] & RET_NONE);
+        }
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool operation_return_same(OperationType p_op) {
+            return  (operation_masks[p_op] & RET_SAME_TYPE);
+        }
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool operation_return_bool(OperationType p_op) {
+            return  (operation_masks[p_op] & RET_BOOLEAN);
+        }
+    };
+
+    class BinaryOperation : public AbstractOperation {
+    public:
+        const Ref<Value> left_operand;
+        const Ref<Value> right_operand;
+        const bool is_primitive;
+    protected:
+        BinaryOperation(OperationType p_op,
+                        const Ref<Value>& p_left,
+                        const Ref<Value>& p_right,
+                        const bool& p_primitive)
+                        : AbstractOperation(p_op),
+                          left_operand(p_left),
+                          right_operand(p_right),
+                          is_primitive(p_primitive) {}
+    };
+
+    class PrimitiveBinaryOperation : public BinaryOperation {
+    private:
+        PrimitiveBinaryOperation(OperationType p_op,
+                                 const Ref<Value>& p_left,
+                                 const Ref<Value>& p_right)
+                                 : BinaryOperation(p_op, p_left, p_right, true) {}
+    public:
+        static Ref<PrimitiveBinaryOperation> create(OperationType p_op,
+                                                    const Ref<Value>& p_left,
+                                                    const Ref<Value>& p_right);
+        static _ALWAYS_INLINE_ Ref<PrimitiveBinaryOperation> add(const Ref<Value>& p_left, const Ref<Value>& p_right){
+            return create(BINARY_ADD, p_left, p_right);
+        }
+    };
+
+
+    class AtomicBinaryExpressionParser : public ThreadUnsafeObject {
+    protected:
+        const RectifiedScope* host_scope;
+        explicit AtomicBinaryExpressionParser(const RectifiedScope* p_host) : host_scope(p_host) {}
+    public:
+        struct ParseResult {
+            const Ref<AbstractOperation> expression;
+            const Type return_type;
+            const RectifiedScope* host;
+
+            friend class AtomicBinaryExpressionParser;
+        private:
+            ParseResult(const Ref<AbstractOperation>& p_expr, Type p_type, const RectifiedScope* p_host)
+                : expression(p_expr), return_type(p_type), host(p_host) {}
+        };
+    protected:
+        _NO_DISCARD_ _ALWAYS_INLINE_ ParseResult create_result(const Ref<AbstractOperation>& p_expr, Type p_type){
+            return { p_expr, p_type, host_scope };
+        }
+    public:
+
+        // This is to make sure no one tries to sneak in an expression as value
+        // Yes, I could have let all of them passed as Ref<Value>, and use dynamic_cast to check,
+        // but that would not be as performance
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<ImmediateValue>& p_right) = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<VariableValue>& p_right) = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<ImmediateValue>& p_right) = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<VariableValue>& p_right) = 0;
+    };
+    class PrimitiveAtomicBinaryExpressionParser : public AtomicBinaryExpressionParser {
+    private:
+        explicit PrimitiveAtomicBinaryExpressionParser(const RectifiedScope* p_host) : AtomicBinaryExpressionParser(p_host) {}
+        friend class RectifiedScope;
+    public:
+
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<ImmediateValue>& p_right) override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<VariableValue>& p_right) override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<ImmediateValue>& p_right) override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<VariableValue>& p_right) override;
+    };
+
+    class CopyConstructInstruction : public Instruction {
+    public:
+        const Ref<VariableInstruction> target_variable;
+        const Ref<Value> value_reference;
+        void const* ctor; // void (*)(void*, const void*)
+    private:
+        CopyConstructInstruction(const Ref<VariableInstruction>& p_target, const Ref<Value>& p_val, void const* p_ctor)
+                : Instruction(IT_COPY_CONSTRUCT), target_variable(p_target), value_reference(p_val), ctor(p_ctor){}
+    public:
+        // This method don't have an unsafe equivalent as it's constructor is saved in its Type data
+        template<typename T>
+        static Ref<CopyConstructInstruction> create_imm(const Ref<VariableInstruction>& p_target, const T& p_value){
+            auto imm = ImmediateValue::create(p_value);
+            if (imm->imm_type != p_target->type) MJ_RAISE("Mismatched type");
+            auto as_value = imm.template c_style_cast<Value>();
+            auto ins = new CopyConstructInstruction(p_target, as_value, (const void*)p_target->type.copy_constructor);
+            return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
+        }
+        static Ref<CopyConstructInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_arg_idx);
+        static Ref<CopyConstructInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target);
+        static Ref<CopyConstructInstruction> create_expr_primitive(const Ref<VariableInstruction> &p_target, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
+    };
+    class AssignInstruction : public Instruction {
+    public:
+        const Ref<VariableInstruction> target_variable;
+        const Ref<Value> value_reference;
+        void const* ctor; // void (*)(void*, const void*)
+    private:
+        AssignInstruction(const Ref<VariableInstruction>& p_target, const Ref<Value>& p_val, void const* p_ctor)
+                : Instruction(IT_ASSIGN), target_variable(p_target), value_reference(p_val), ctor(p_ctor){}
+    public:
+        template<typename T>
+        static Ref<AssignInstruction> create_imm_unsafe(const Ref<VariableInstruction>& p_target, const T& p_value) {
+            auto imm = ImmediateValue::create(p_value).template c_style_cast<Value>();
+            auto ins = new AssignInstruction(p_target, imm, (const void*)ObjectTools::assign<T>);
+            return Ref<AssignInstruction>::from_uninitialized_object(ins);
+        }
+        template<typename T>
+        static Ref<AssignInstruction> create_imm(const Ref<VariableInstruction>& p_target, const T& p_value) {
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
+            if (type != p_target->type) MJ_RAISE("Mismatched type");
+            return create_imm_unsafe(p_target, p_value);
+        }
+        template<typename T>
+        static Ref<AssignInstruction> create_arg_unsafe(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx);
+        template<typename T>
+        static Ref<AssignInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_idx){
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
+            if (type != p_target->type) MJ_RAISE("Mismatched type");
+            return create_arg_unsafe<T>(p_scope, p_target, p_idx);
+        }
+        template<typename T>
+        static Ref<AssignInstruction> create_var_unsafe(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
+            if (p_target->type != p_assign_target->type) MJ_RAISE("Mismatched type");
+            auto var = VariableValue::create(p_assign_target).c_style_cast<Value>();
+            auto ins = new AssignInstruction(p_target, var, (const void*)ObjectTools::assign<T>);
+            return Ref<AssignInstruction>::from_uninitialized_object(ins);
+        }
+        template<typename T>
+        static Ref<AssignInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target){
+            static TYPE_CONSTEXPR auto type = Type::create<T>();
+            if (type != p_target->type) MJ_RAISE("Mismatched type");
+            return create_var_unsafe<T>(p_target, p_assign_target);
+        }
+        static Ref<AssignInstruction> create_expr_primitive(const Ref<VariableInstruction> &p_target, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
+    };
+
     class RectifiedScope : public ThreadUnsafeObject {
     private:
         const RectifiedScope* parent_scope;
@@ -409,17 +600,17 @@ namespace microjit {
 
         void push_instruction(Ref<Instruction> p_ins);
     public:
-        explicit RectifiedScope(const Ref<ArgumentsDeclaration>& p_args, const RectifiedScope* p_parent = nullptr)
-            : arguments(p_args), parent_scope(p_parent){}
-        _NO_DISCARD_ const auto& get_arguments() const { return arguments; }
-        _NO_DISCARD_ bool has_variable(const Ref<VariableInstruction>& p_var) const {
+        explicit RectifiedScope(const Ref<ArgumentsDeclaration>& p_args, const RectifiedScope* p_parent = nullptr);
+        _NO_DISCARD_ _ALWAYS_INLINE_ const auto& get_arguments() const { return arguments; }
+        _NO_DISCARD_ _ALWAYS_INLINE_ bool has_variable(const Ref<VariableInstruction>& p_var) const {
             return (p_var.is_valid() && p_var->parent_scope == this && p_var->scope_offset <= current_scope_offset);
         }
-        _NO_DISCARD_ bool has_variable_in_all_scope(const Ref<VariableInstruction>& p_var) const {
-            return has_variable(p_var) || (parent_scope && parent_scope->has_variable_in_all_scope(p_var));
-        }
+        _NO_DISCARD_ bool has_variable_in_all_scope(const Ref<VariableInstruction>& p_var) const;
         template<typename T>
         Ref<VariableInstruction> create_variable(const uint32_t& p_props = VariableInstruction::NONE){
+            static TYPE_CONSTEXPR auto void_type = Type::create<void>();
+            static TYPE_CONSTEXPR auto curr_type = Type::create<T>();
+            TYPE_ASSERT(void_type != curr_type);
             // Create an anonymous ins
             auto ins = VariableInstruction::create<T>(this, p_props);
             variables.push_back(ins);
@@ -447,20 +638,9 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
-        Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
-            if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
-            auto ins = CopyConstructInstruction::create_arg(this, p_var, p_idx);
-            push_instruction(ins.template c_style_cast<Instruction>());
-            return ins;
-        }
-        Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
-            if (!has_variable(p_var)) MJ_RAISE("Does not own assignment target");
-            if (!has_variable_in_all_scope(p_copy_target)) MJ_RAISE("Does not own copy target");
-            if (p_var == p_copy_target) MJ_RAISE("Assign and copy target must not be the same");
-            auto ins = CopyConstructInstruction::create_var(p_var, p_copy_target);
-            push_instruction(ins.template c_style_cast<Instruction>());
-            return ins;
-        }
+        Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx);
+        Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target);
+        Ref<CopyConstructInstruction> construct_from_primitive_atomic_expression(const Ref<VariableInstruction> &p_var, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
         template<typename T>
         Ref<AssignInstruction> assign_from_immediate_unsafe(const Ref<VariableInstruction>& p_var, const T& p_imm){
             if (!has_variable_in_all_scope(p_var)) MJ_RAISE("Does not own variable");
@@ -507,6 +687,7 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
+        Ref<AssignInstruction> assign_from_primitive_atomic_expression(const Ref<VariableInstruction> &p_var, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
         template<typename From, typename To>
         Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
             static TYPE_CONSTEXPR auto f_type = Type::create<From>();
@@ -546,13 +727,8 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
-        Ref<ScopeCreateInstruction> create_scope(const Ref<RectifiedScope>& p_child){
-            if (p_child->parent_scope != this) MJ_RAISE("Child's parent is not self");
-            auto ins = Ref<ScopeCreateInstruction>::make_ref(p_child);
-            directly_owned_scopes.push_back(p_child);
-            push_instruction(ins.template c_style_cast<Instruction>());
-            return ins;
-        }
+        Ref<ScopeCreateInstruction> create_scope(const Ref<RectifiedScope>& p_child);
+        Ref<PrimitiveAtomicBinaryExpressionParser> create_primitive_binary_expression_parser() const;
 
         _NO_DISCARD_ const auto& get_instructions() const { return instructions; }
         _NO_DISCARD_ const auto& get_variables() const { return variables; }
@@ -599,6 +775,9 @@ namespace microjit {
         Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
             return rectified_scope->construct_from_variable(p_var, p_copy_target);
         }
+        Ref<CopyConstructInstruction> construct_from_primitive_atomic_expression(const Ref<VariableInstruction> &p_var, const AtomicBinaryExpressionParser::ParseResult& p_parse_result){
+            return rectified_scope->construct_from_primitive_atomic_expression(p_var, p_parse_result);
+        }
         template<typename T>
         Ref<AssignInstruction> assign_from_immediate_unsafe(const Ref<VariableInstruction>& p_var, const T& p_imm){
             return rectified_scope->assign_from_immediate_unsafe<T>(p_var, p_imm);
@@ -623,23 +802,18 @@ namespace microjit {
         Ref<AssignInstruction> assign_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
             return rectified_scope->assign_from_variable<T>(p_var, p_copy_target);
         }
+        Ref<AssignInstruction> assign_from_primitive_atomic_expression(const Ref<VariableInstruction> &p_var, const AtomicBinaryExpressionParser::ParseResult& p_parse_result){
+            return rectified_scope->assign_from_primitive_atomic_expression(p_var, p_parse_result);
+        }
         template<typename From, typename To>
         Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-#ifndef USE_TYPE_CONSTEXPR
-            if (Type::create<From>() == Type::create<To>()) MJ_RAISE("Conversion types must be different");
-#else
-            static_assert(Type::create<From>() != Type::create<To>());
-#endif
+            TYPE_ASSERT(Type::create<From>() != Type::create<To>());
             return rectified_scope->convert<From, To>(p_from, p_to);
         }
         template<typename From, typename To>
         [[deprecated("Primitive conversion currently does not work properly. Please use convert() for now")]]
         Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-#ifndef USE_TYPE_CONSTEXPR
-            if (Type::create<From>() == Type::create<To>()) MJ_RAISE("Conversion types must be different");
-#else
-            static_assert(Type::create<From>() != Type::create<To>());
-#endif
+            TYPE_ASSERT(Type::create<From>() != Type::create<To>());
             return rectified_scope->primitive_convert<From, To>(p_from, p_to);
         }
 
@@ -654,6 +828,9 @@ namespace microjit {
             auto new_scope = Ref<Scope<R, Args...>>::make_ref(parent_function, this);
             rectified_scope->create_scope(new_scope->rectified_scope);
             return new_scope;
+        }
+        Ref<PrimitiveAtomicBinaryExpressionParser> create_primitive_binary_expression_parser() const {
+            return rectified_scope->create_primitive_binary_expression_parser();
         }
         _NO_DISCARD_ Ref<RectifiedScope> get_rectified_scope() const { return rectified_scope; }
     };
@@ -670,7 +847,7 @@ namespace microjit {
                           const Ref<ArgumentsDeclaration>& p_args,
                           std::function<void(VirtualStack*)>* p_trampoline,
                           const Ref<RectifiedScope>& p_main_scope,
-                          const Type& p_ret)
+                          Type p_ret)
                           : host(p_host), arguments(p_args), trampoline(p_trampoline),
                             main_scope(p_main_scope), return_type(p_ret) {}
     public:
@@ -679,7 +856,7 @@ namespace microjit {
                                              const Ref<ArgumentsDeclaration>& p_args,
                                              std::function<void(VirtualStack*)>* p_trampoline,
                                              const Ref<RectifiedScope>& p_main_scope,
-                                             const Type& p_ret){
+                                             Type p_ret){
             auto rectified = new RectifiedFunction(p_host, p_args, p_trampoline, p_main_scope, p_ret);
             return Ref<RectifiedFunction>::from_uninitialized_object(rectified);
         }

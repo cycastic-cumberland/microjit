@@ -1,7 +1,7 @@
 # MicroJIT
 
 
-MicroJIT is a lightweight Dynamic Compilation Framework designed to enable developers
+MicroJIT is a lightweight Dynamic Compilation Library designed to enable developers
 with efficient runtime code generation.
 
 **This project is in the early stage of its lifetime so most features currently do not work, correctly or at all**
@@ -89,7 +89,7 @@ All instructions are issued through `Scope<R, Args...>`. All variables can only 
 
 ### Basic features
 
-- [x] Compile-and-go
+- [x] Lazy compilation
 - [x] x86_64 support
 - [x] Generic functions
 - [x] Variables
@@ -97,12 +97,12 @@ All instructions are issued through `Scope<R, Args...>`. All variables can only 
 - [x] Arguments
 - [x] Return value
 - [x] Orchestrator's basic functionalities
-- [x] Compilation function_cache
 - [x] Construction/Copy construction/Destruction
-- [x] Virtual stack extraction
+- [x] Virtual stack injection/extraction
 - [x] Multiple scopes
 - [x] Type casting (Non-inline)
-- [ ] Operations (and overloaded operator call)
+- [x] Expressions
+- [x] Primitive Operations
 - [ ] Branches (if/else/for/while)
 - [x] JIT compiled function call
 - [x] Compile-and-go for JIT compiled function call
@@ -111,7 +111,9 @@ All instructions are issued through `Scope<R, Args...>`. All variables can only 
 
 ### Advanced features
 
+- [ ] (Overloaded) Operations
 - [x] Asynchronous compilation
+- [ ] Function dependencies analysis
 - [ ] More optimizations
 - [ ] x86 and Windows support
 - TBA...

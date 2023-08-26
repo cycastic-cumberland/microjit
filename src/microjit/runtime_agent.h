@@ -2,8 +2,8 @@
 // Created by cycastic on 8/21/23.
 //
 
-#ifndef MICROJIT_EXPERIMENT_COMPILATION_AGENT_H
-#define MICROJIT_EXPERIMENT_COMPILATION_AGENT_H
+#ifndef MICROJIT_EXPERIMENT_RUNTIME_AGENT_H
+#define MICROJIT_EXPERIMENT_RUNTIME_AGENT_H
 
 #include "decaying_weighted_cache.h"
 #include "instructions.h"
@@ -121,18 +121,18 @@ namespace microjit
         bool remove_function(const void* p_host) override;
         void register_heat(const void* p_host) override;
     };
-    template <class CompilerTy>
-    class CompilationAgent {
+    template <class TCompiler>
+    class RuntimeAgent {
     public:
     private:
         
         static Ref<MicroJITCompiler> create_compiler(const Ref<MicroJITRuntime>& p_runtime) {
-            return Ref<CompilerTy>::make_ref(p_runtime).template c_style_cast<MicroJITCompiler>();
+            return Ref<TCompiler>::make_ref(p_runtime).template c_style_cast<MicroJITCompiler>();
         }
         CompilationHandler* handler{};
         Ref<MicroJITRuntime> runtime{Ref<MicroJITRuntime>::make_ref()};
     public:
-        explicit CompilationAgent(const CompilationAgentSettings& p_settings){
+        explicit RuntimeAgent(const CompilationAgentSettings& p_settings){
             switch (p_settings.type) {
                 case SINGLE_UNSAFE:
                     handler = new SingleUnsafeCompilationHandler(p_settings, create_compiler(runtime), runtime);
@@ -145,7 +145,7 @@ namespace microjit
                     break;
             }
         }
-        ~CompilationAgent(){
+        ~RuntimeAgent(){
             delete handler;
         }
         bool function_compiled(const Ref<RectifiedFunction> &p_func) const {
@@ -172,5 +172,4 @@ namespace microjit
     };
 }
 
-
-#endif //MICROJIT_EXPERIMENT_COMPILATION_AGENT_H
+#endif //MICROJIT_EXPERIMENT_RUNTIME_AGENT_H
