@@ -120,6 +120,51 @@ microjit::Ref<microjit::CopyConstructInstruction> microjit::RectifiedScope::cons
     return ins;
 }
 
+microjit::Ref<microjit::IfInstruction>
+microjit::RectifiedScope::if_branch(const microjit::AtomicBinaryExpressionParser::ParseResult &p_parse_result,
+                                    const microjit::Ref<microjit::RectifiedScope> &p_child) {
+    if (p_parse_result.host != this)
+        MJ_RAISE("Does not own this expression");
+    directly_owned_scopes.push_back(p_child);
+    auto ins = IfInstruction::create(p_parse_result.expression, p_child);
+    branches.push_back(ins.c_style_cast<BranchInstruction>());
+    push_instruction(ins.c_style_cast<Instruction>());
+    return ins;
+}
+
+microjit::Ref<microjit::ElseInstruction>
+microjit::RectifiedScope::else_branch(const microjit::Ref<microjit::RectifiedScope> &p_child) {
+    if (!branches.empty()){
+        auto last_branch = branches[branches.size() - 1];
+        if (last_branch->get_scope_offset() != current_scope_offset - 1)
+            MJ_RAISE("Last branch is not an IF branch");
+    } else
+        MJ_RAISE("Does not have any IF branch");
+    directly_owned_scopes.push_back(p_child);
+    auto ins = ElseInstruction::create(p_child);
+    branches.push_back(ins.c_style_cast<BranchInstruction>());
+    push_instruction(ins.c_style_cast<Instruction>());
+    return ins;
+}
+
+microjit::Ref<microjit::WhileInstruction>
+microjit::RectifiedScope::while_branch(const microjit::AtomicBinaryExpressionParser::ParseResult &p_parse_result,
+                                       const microjit::Ref<microjit::RectifiedScope> &p_child) {
+    if (p_parse_result.host != this)
+        MJ_RAISE("Does not own this expression");
+    directly_owned_scopes.push_back(p_child);
+    auto ins = WhileInstruction::create(p_parse_result.expression, p_child);
+    branches.push_back(ins.c_style_cast<BranchInstruction>());
+    push_instruction(ins.c_style_cast<Instruction>());
+    return ins;
+}
+
+microjit::Ref<microjit::BreakInstruction> microjit::RectifiedScope::break_loop() {
+    auto ins = BreakInstruction::create();
+    push_instruction(ins.c_style_cast<Instruction>());
+    return ins;
+}
+
 microjit::InvokeJitInstruction::InvokeJitInstruction(const microjit::Ref<microjit::RectifiedFunction> &p_func,
                                                      const microjit::Ref<microjit::ArgumentsVector> &p_args,
                                                      const Ref<VariableInstruction>& p_ret_var, const size_t& p_total_size)
@@ -276,4 +321,32 @@ microjit::Ref<microjit::CopyConstructInstruction> microjit::CopyConstructInstruc
     auto var = p_parse_result.expression.c_style_cast<Value>();
     auto ins = new CopyConstructInstruction(p_target, var, (const void*)ObjectTools::empty_copy_ctor);
     return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
+}
+
+microjit::BranchInstruction::BranchInstruction(microjit::BranchInstruction::BranchType p_type,
+                                               const microjit::Ref<microjit::RectifiedScope> &p_sub_scope)
+                                               : Instruction(IT_BRANCH),
+                                                 branch_type(p_type), sub_scope(p_sub_scope) {}
+
+microjit::Ref<microjit::IfInstruction>
+microjit::IfInstruction::create(const microjit::Ref<microjit::AbstractOperation> &p_condition,
+                                const microjit::Ref<microjit::RectifiedScope> &p_scope) {
+    if (!AbstractOperation::operation_does_return(p_condition->operation_type))
+        MJ_RAISE("Conditional expression does not return anything");
+    auto ins = new IfInstruction(p_condition, p_scope);
+    return Ref<IfInstruction>::from_uninitialized_object(ins);
+}
+
+microjit::Ref<microjit::ElseInstruction> microjit::ElseInstruction::create(const Ref<RectifiedScope>& p_scope){
+    auto ins = new ElseInstruction(p_scope);
+    return Ref<ElseInstruction>::from_uninitialized_object(ins);
+}
+
+microjit::Ref<microjit::WhileInstruction>
+microjit::WhileInstruction::create(const microjit::Ref<microjit::AbstractOperation> &p_condition,
+                                   const microjit::Ref<microjit::RectifiedScope> &p_scope) {
+    if (!AbstractOperation::operation_does_return(p_condition->operation_type))
+        MJ_RAISE("Conditional expression does not return anything");
+    auto ins = new WhileInstruction(p_condition, p_scope);
+    return Ref<WhileInstruction>::from_uninitialized_object(ins);
 }

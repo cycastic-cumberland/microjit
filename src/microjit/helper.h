@@ -90,6 +90,11 @@ namespace microjit {
             ref(p_from);
             return *this;
         }
+        Ref& operator=(std::nullptr_t){
+            unref();
+            reference = nullptr;
+            return *this;
+        }
         Ref(const Ref &p_from) {
             ref(p_from);
         }
@@ -97,6 +102,7 @@ namespace microjit {
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_null() const { return reference == nullptr; }
 
         constexpr Ref() = default;
+        Ref(std::nullptr_t) : Ref() {}
 
         ~Ref() {
             unref();
@@ -131,8 +137,7 @@ namespace microjit {
         _ALWAYS_INLINE_ Ref<To> c_style_cast() const {
             // Ref<T> only hold a single property, a reference to an object
             // So assuming that the programmer know what they are doing, this should not cause any problem
-            auto casted = (Ref<To>*)this;
-            return *casted;
+            return *((Ref<To>*)this);
         }
     };
     template <typename T, class RefCounter = ThreadUnsafeObject>

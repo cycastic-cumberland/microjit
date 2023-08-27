@@ -3,10 +3,10 @@
 //
 #if defined(__x86_64__) || defined(_M_X64)
 
+#include <queue>
 #include "jit_x86_64.h"
 #include "virtual_stack.h"
 
-// I've yet to test this, but this probably won't work with stdcall
 
 static constexpr auto rbp = asmjit::x86::rbp;
 static constexpr auto rsp = asmjit::x86::rsp;
@@ -72,6 +72,32 @@ static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
         }                                                                                           \
     }
 
+microjit::Ref<microjit::MicroJITCompiler_x86_64::BranchesReport>
+microjit::MicroJITCompiler_x86_64::create_branches_report(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                          const microjit::Ref<microjit::RectifiedFunction> &p_func) {
+    auto report = new BranchesReport();
+    std::queue<Ref<BranchInstruction>> scope_stack{};
+    for (const auto& branch : p_func->main_scope->get_branches()) {
+        scope_stack.push(branch);
+    }
+    Ref<BranchInfo> last_branch_info{};
+    while (!scope_stack.empty()) {
+        auto current_branch = scope_stack.front();
+        scope_stack.pop();
+        auto new_info = Ref<BranchInfo>::make_ref(assembler);
+        if (current_branch->branch_type == BranchInstruction::BRANCH_ELSE) {
+            last_branch_info->else_branch = current_branch;
+            last_branch_info = nullptr;
+        }
+        report->branch_map[current_branch] = new_info;
+        last_branch_info = new_info;
+        for (const auto& branch : current_branch->sub_scope->get_branches()) {
+            scope_stack.push(branch);
+        }
+    }
+    return Ref<BranchesReport>::from_uninitialized_object(report);
+}
+
 
 microjit::MicroJITCompiler::CompilationResult
 microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) const {
@@ -81,6 +107,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
         assembly = Ref<Assembly>::make_ref(runtime->get_asmjit_runtime());
     }
     auto& assembler = assembly->assembler;
+
     AINL("Prologue");
     AIN(assembler->push(rbp));
     AIN(assembler->mov(rbp, rsp));
@@ -112,6 +139,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     const auto& function_arguments = p_func->arguments;
 
     auto frame_report = create_frame_report(p_func);
+    auto branches_report = create_branches_report(assembler, p_func);
     const auto& offset_map = frame_report->variable_map;
     if (frame_report->max_frame_size){
         AINL("Resizing virtual stack");
@@ -120,20 +148,21 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
 
     auto exit_label = assembler->newLabel();
     std::stack<ScopeInfo> scope_stack{};
-    scope_stack.push(ScopeInfo{p_func->main_scope, -1, Box<asmjit::Label>()});
+    std::stack<Ref<BranchInfo>> loop_stack{};
+    scope_stack.push(ScopeInfo{p_func->main_scope, -1, nullptr, nullptr, false });
     while (!scope_stack.empty()){
         auto current = scope_stack.top();
         AINL("Entering scope " << std::to_string((size_t)current.scope.ptr()));
         current.iterating++;
         scope_stack.pop();
-        if (current.label.is_null()){
-            current.label = Box<asmjit::Label>::make_box(asmjit::Label(assembler->newLabel()));
-            AIN(assembler->bind(*(current.label.ptr())));
-        }
 
         const auto& instructions = current.scope->get_instructions();
         for (auto s = int64_t(instructions.size()); current.iterating < s; current.iterating++){
             const auto& current_instruction = instructions[current.iterating];
+            if (current.branch_info.is_valid() && !current.registered_begin) {
+                AIN(assembler->bind(current.branch_info->begin_of_scope));
+                current.registered_begin = true;
+            }
             bool loop_break = false;
             switch (current_instruction->get_instruction_type()) {
                 case Instruction::IT_CONSTRUCT: {
@@ -209,6 +238,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                         }
                         case Value::VAL_EXPRESSION: {
                             assign_atomic_expression(assembler, frame_report, as_assign);
+                            break;
                         }
                     }
                     break;
@@ -233,16 +263,23 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     iterative_destructor_call(assembler, frame_report, scope_stack);
                     scope_stack.pop();
                     AIN(assembler->jmp(exit_label));
+                    // Skips every instructions left in this scope
                     loop_break = true;
                     current.iterating = -1;
+                    // Bind the end of the scope
+                    if (current.branch_info.is_valid())
+                        AIN(assembler->bind(current.branch_info->end_of_scope));
+                    // If this is a loop, remove it from the loop stack
+                    if (!loop_stack.empty() && (loop_stack.top() == current.branch_info))
+                        loop_stack.pop();
                     break;
                 }
                 case Instruction::IT_SCOPE_CREATE: {
                     AINL("Creating new scope");
                     scope_stack.push(current);
                     scope_stack.push(
-                            ScopeInfo{current_instruction.c_style_cast<ScopeCreateInstruction>()->scope,
-                                      -1, Box<asmjit::Label>()});
+                            ScopeInfo{ current_instruction.c_style_cast<ScopeCreateInstruction>()->scope,
+                                       -1, nullptr, nullptr, false });
                     loop_break = true;
                     break;
                 }
@@ -259,12 +296,13 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     break;
                 }
                 case Instruction::IT_PRIMITIVE_CONVERT: {
-                    auto as_convert = current_instruction.c_style_cast<PrimitiveConvertInstruction>();
-                    auto from_offset = offset_map.at(as_convert->from_var);
-                    auto to_offset = offset_map.at(as_convert->to_var);
-                    auto converter_cb = converter.get_handler(as_convert->converter);
-                    converter_cb(assembler, LOAD_VRBP_LOC, from_offset, to_offset);
-                    break;
+                    MJ_RAISE("Primitive conversion is currently unsupported");
+//                    auto as_convert = current_instruction.c_style_cast<PrimitiveConvertInstruction>();
+//                    auto from_offset = offset_map.at(as_convert->from_var);
+//                    auto to_offset = offset_map.at(as_convert->to_var);
+//                    auto converter_cb = converter.get_handler(as_convert->converter);
+//                    converter_cb(assembler, LOAD_VRBP_LOC, from_offset, to_offset);
+//                    break;
                 }
                 case Instruction::IT_INVOKE_JIT: {
                     auto as_invocation = current_instruction.c_style_cast<InvokeJitInstruction>();
@@ -408,16 +446,110 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     }
                     break;
                 }
+                case Instruction::IT_BRANCH: {
+                    auto as_branch = current_instruction.c_style_cast<BranchInstruction>();
+                    auto branch_info = branches_report->branch_map.at(as_branch);
+                    switch (as_branch->branch_type) {
+                        case BranchInstruction::BRANCH_IF: {
+                            // Heh, as if
+                            auto as_if = as_branch.c_style_cast<IfInstruction>();
+                            if (!AbstractOperation::is_binary(as_if->condition->operation_type))
+                                MJ_RAISE("Unary operations currently unsupported");
+                            branch_eval_binary_atomic_expression(assembler, frame_report,
+                                                                 branches_report, as_branch,
+                                                                 branch_info,
+                                                                 as_if->condition.c_style_cast<BinaryOperation>());
+                            auto else_branch = branch_info->else_branch;
+                            AIN(assembler->cmp(asmjit::x86::al, 0));
+                            if (else_branch.is_valid()){
+                                auto else_branch_report = branches_report->branch_map.at(else_branch);
+                                AIN(assembler->je(else_branch_report->begin_of_scope));
+                            } else {
+                                AIN(assembler->je(branch_info->end_of_scope));
+                            }
+                            scope_stack.push(current);
+                            scope_stack.push(
+                                    ScopeInfo{ as_if->sub_scope,
+                                               -1, as_branch, branch_info, false });
+                            loop_break = true;
+                            break;
+                        }
+                        case BranchInstruction::BRANCH_ELSE: {
+                            auto as_else = as_branch.c_style_cast<ElseInstruction>();
+                            scope_stack.push(current);
+                            scope_stack.push(
+                                    ScopeInfo{ as_else->sub_scope,
+                                               -1, as_branch, branch_info, false });
+                            loop_break = true;
+                            break;
+                        }
+                        case BranchInstruction::BRANCH_WHILE: {
+                            auto as_while = as_branch.c_style_cast<WhileInstruction>();
+                            // Jump to the end to check conditions
+                            AIN(assembler->jmp(branch_info->end_of_scope));
+                            scope_stack.push(current);
+                            scope_stack.push(
+                                    ScopeInfo{ as_while->sub_scope,
+                                               -1, as_branch, branch_info, false });
+                            loop_stack.push(branch_info);
+                            loop_break = true;
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case Instruction::IT_BREAK: {
+                    if (loop_stack.empty()) break;
+                    single_scope_destructor_call(assembler, frame_report, current);
+                    auto top_most_loop = loop_stack.top();
+                    AIN(assembler->jmp(top_most_loop->loop_end_of_scope));
+                    break;
+                }
+                case Instruction::IT_INVOKE_NATIVE:
+                    MJ_RAISE("Not yet supported");
                 case Instruction::IT_NONE:
                 case Instruction::IT_DECLARE_VARIABLE:
-                default:
                     break;
             }
             if (loop_break) break;
-            else if (current.iterating == s - 1){
-                // Currently at the last instruction,
-                // call destructors
-                single_scope_destructor_call(assembler, frame_report, current);
+        }
+        // If exited naturally
+        if (current.iterating == current.scope->get_instructions().size()){
+            // Currently at the last instruction,
+            // call destructors
+            single_scope_destructor_call(assembler, frame_report, current);
+            if (current.branch_info.is_valid()) {
+                AIN(assembler->bind(current.branch_info->end_of_scope));
+                auto curr_branch_instruction = current.branch_instruction;
+                switch (curr_branch_instruction->branch_type) {
+                    case BranchInstruction::BRANCH_IF: {
+                        auto else_scope = current.branch_info->else_branch;
+                        if (else_scope.is_valid()) {
+                            auto else_branch_info = branches_report->branch_map.at(else_scope);
+                            // If condition have an else branch, jump to the end of it after exit normally
+                            AIN(assembler->jmp(else_branch_info->end_of_scope));
+                        }
+                        break;
+                    }
+                    case BranchInstruction::BRANCH_WHILE: {
+                        auto as_while = curr_branch_instruction.c_style_cast<WhileInstruction>();
+                        if (!AbstractOperation::is_binary(as_while->condition->operation_type))
+                            MJ_RAISE("Unary operations currently unsupported");
+                        branch_eval_binary_atomic_expression(assembler, frame_report,
+                                                             branches_report,
+                                                             curr_branch_instruction,
+                                                             current.branch_info,
+                                                             as_while->condition.c_style_cast<BinaryOperation>());
+                        // If satisfied, jump to the start of the scope
+                        AIN(assembler->cmp(asmjit::x86::al, 0));
+                        AIN(assembler->jne(current.branch_info->begin_of_scope));
+                        AIN(assembler->bind(current.branch_info->loop_end_of_scope));
+                        loop_stack.pop();
+                        break;
+                    }
+                    default:
+                        break;
+                }
             }
         }
     }
@@ -919,7 +1051,6 @@ static void integer_arithmetic(microjit::Box<asmjit::x86::Assembler> &assembler,
         default:
             MJ_RAISE("Unsupported");
     }
-//    INTEGER_MOVE(PRIMITIVE_EXPRESSION_LEFT_INTEGER, PRIMITIVE_EXPRESSION_RETURN_INTEGER, data_size)
 }
 
 static void integer_comparison(microjit::Box<asmjit::x86::Assembler> &assembler,
@@ -948,7 +1079,7 @@ static void integer_comparison(microjit::Box<asmjit::x86::Assembler> &assembler,
                                           PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
                                           seta, data_size)
             break;
-        case microjit::AbstractOperation::BINARY_GREATER_EQ:
+        case microjit::AbstractOperation::BINARY_GREATER_OR_EQUAL:
             if (is_signed)
                 INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
                                           PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
@@ -968,7 +1099,7 @@ static void integer_comparison(microjit::Box<asmjit::x86::Assembler> &assembler,
                                           PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
                                           setb, data_size)
             break;
-        case microjit::AbstractOperation::BINARY_LESSER_EQ:
+        case microjit::AbstractOperation::BINARY_LESSER_OR_EQUAL:
             if (is_signed)
                 INTEGER_COMPARISON_HELPER(PRIMITIVE_EXPRESSION_LEFT_INTEGER,
                                           PRIMITIVE_EXPRESSION_RIGHT_INTEGER,
@@ -1010,7 +1141,6 @@ static void floating_point_arithmetic(microjit::Box<asmjit::x86::Assembler> &ass
         default:
             MJ_RAISE("Unsupported");
     }
-//    FLOATING_POINT_MOVE(PRIMITIVE_EXPRESSION_LEFT_FP, PRIMITIVE_EXPRESSION_RETURN_FP, p_data_size)
 }
 
 static void floating_point_comparison(microjit::Box<asmjit::x86::Assembler> &assembler,
@@ -1036,7 +1166,7 @@ static void floating_point_comparison(microjit::Box<asmjit::x86::Assembler> &ass
                                      p_data_size, seta)
             break;
         }
-        case microjit::AbstractOperation::BINARY_GREATER_EQ: {
+        case microjit::AbstractOperation::BINARY_GREATER_OR_EQUAL: {
             FLOATING_POINT_CMP_OTHER(PRIMITIVE_EXPRESSION_LEFT_FP,
                                      PRIMITIVE_EXPRESSION_RIGHT_FP,
                                      p_data_size, setnb)
@@ -1048,7 +1178,7 @@ static void floating_point_comparison(microjit::Box<asmjit::x86::Assembler> &ass
                                      p_data_size, setb)
             break;
         }
-        case microjit::AbstractOperation::BINARY_LESSER_EQ: {
+        case microjit::AbstractOperation::BINARY_LESSER_OR_EQUAL: {
             FLOATING_POINT_CMP_OTHER(PRIMITIVE_EXPRESSION_LEFT_FP,
                                      PRIMITIVE_EXPRESSION_RIGHT_FP,
                                      p_data_size, setna)
@@ -1124,10 +1254,81 @@ void microjit::MicroJITCompiler_x86_64::assign_primitive_binary_atomic_expressio
         MJ_RAISE("Unsupported operation");
 }
 
-#undef VAR_COPY
-#undef STORE_VRBP
-#undef STORE_VRSP
-#undef LOAD_VRBP
-#undef LOAD_VRSP
+
+void microjit::MicroJITCompiler_x86_64::branch_eval_binary_atomic_expression(
+        microjit::Box<asmjit::x86::Assembler> &assembler,
+        const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_report,
+        const microjit::Ref<microjit::MicroJITCompiler_x86_64::BranchesReport>& p_branches_report,
+        const microjit::Ref<microjit::BranchInstruction> &p_target_var,
+        const microjit::Ref<microjit::MicroJITCompiler_x86_64::BranchInfo> &p_branch_info,
+        const microjit::Ref<microjit::BinaryOperation> &p_binary) {
+    if (p_binary->is_primitive)
+        branch_eval_primitive_binary_atomic_expression(assembler, p_frame_report, p_branches_report, p_target_var,
+                                                       p_branch_info, p_binary.c_style_cast<PrimitiveBinaryOperation>());
+    else
+        MJ_RAISE("Branch evaluation only support primitive operations");
+}
+
+#define CLEAR_XMM(m_reg) AIN(assembler->xorps(REP_FP(m_reg), REP_FP(m_reg)))
+
+void microjit::MicroJITCompiler_x86_64::branch_eval_primitive_binary_atomic_expression(
+        microjit::Box<asmjit::x86::Assembler> &assembler,
+        const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_report,
+        const microjit::Ref<microjit::MicroJITCompiler_x86_64::BranchesReport>& p_branches_report,
+        const microjit::Ref<microjit::BranchInstruction> &p_instruction,
+        const microjit::Ref<microjit::MicroJITCompiler_x86_64::BranchInfo> &p_branch_info,
+        const microjit::Ref<microjit::PrimitiveBinaryOperation> &p_primitive_binary) {
+    auto left_operand = p_primitive_binary->left_operand;
+    auto right_operand = p_primitive_binary->right_operand;
+    Box<Type> operand_type_boxed{};
+    bool is_operand_floating_point{};
+    switch (left_operand->get_value_type()) {
+        case Value::VAL_IMMEDIATE: {
+            auto as_imm = left_operand.c_style_cast<ImmediateValue>();
+            auto type = as_imm->imm_type;
+            is_operand_floating_point = Type::is_floating_point(type);
+            operand_type_boxed = Box<Type>::make_box(type);
+            break;
+        }
+        case Value::VAL_VARIABLE: {
+            auto as_var = left_operand.c_style_cast<VariableValue>();
+            auto type = as_var->variable->type;
+            is_operand_floating_point = Type::is_floating_point(type);
+            operand_type_boxed = Box<Type>::make_box(type);
+            break;
+        }
+        case Value::VAL_ARGUMENT:
+        case Value::VAL_EXPRESSION:
+            MJ_RAISE("Unsupported");
+    }
+    const auto operand_type = *(operand_type_boxed.ptr());
+    const auto operation_type = p_primitive_binary->operation_type;
+
+    // Move the left operand into the first register
+    MOVE_PRIMITIVE_OPERAND(operand_type, is_operand_floating_point, left_operand,
+                           PRIMITIVE_EXPRESSION_LEFT_FP, PRIMITIVE_EXPRESSION_LEFT_INTEGER);
+
+    // Move the second operand into the second register
+    MOVE_PRIMITIVE_OPERAND(operand_type, is_operand_floating_point, right_operand,
+                           PRIMITIVE_EXPRESSION_RIGHT_FP, PRIMITIVE_EXPRESSION_RIGHT_INTEGER);
+    // Calculate the stuff
+    if (AbstractOperation::operation_return_same(operation_type)){
+        if (is_operand_floating_point) {
+            floating_point_arithmetic(assembler, operation_type, operand_type.size);
+            CLEAR_XMM(PRIMITIVE_EXPRESSION_RIGHT_FP);
+            floating_point_comparison(assembler, AbstractOperation::BINARY_NOT_EQUAL, operand_type.size);
+        } else {
+            auto is_signed = Type::is_signed_integer(operand_type);
+            integer_arithmetic(assembler, operation_type, operand_type);
+        }
+    } else if (AbstractOperation::operation_return_bool(operation_type)) {
+        if (is_operand_floating_point) {
+            floating_point_comparison(assembler, operation_type, operand_type.size);
+        } else {
+            integer_comparison(assembler, operation_type, operand_type);
+        }
+    } else
+        MJ_RAISE("Unsupported operation");
+}
 
 #endif

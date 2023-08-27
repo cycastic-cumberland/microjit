@@ -44,6 +44,15 @@ microjit::MicroJITCompiler::create_frame_report(const microjit::Ref<microjit::Re
                                               0});
                     break_loop = true;
                     break;
+                case Instruction::IT_BRANCH:
+                    current.iterating++;
+                    stack.push(current);
+                    stack.push(ScopeReport{ins.c_style_cast<BranchInstruction>()->sub_scope,
+                                           current.current_size,
+                                           current.current_object_count,
+                                           0});
+                    break_loop = true;
+                    break;
                 default:
                     break;
             }

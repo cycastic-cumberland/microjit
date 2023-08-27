@@ -25,17 +25,33 @@
 #endif
 
 
-
 namespace microjit {
     class MicroJITCompiler_x86_64 : public MicroJITCompiler {
     private:
+        struct BranchInfo : public ThreadUnsafeObject {
+            const asmjit::Label begin_of_scope;
+            const asmjit::Label end_of_scope;
+            const asmjit::Label loop_end_of_scope;
+            Ref<BranchInstruction> else_branch{};
+            explicit BranchInfo(microjit::Box<asmjit::x86::Assembler> &assembler)
+                : begin_of_scope(assembler->newLabel()),
+                  end_of_scope(assembler->newLabel()),
+                  loop_end_of_scope(assembler->newLabel()) {}
+        };
+        struct BranchesReport : public ThreadUnsafeObject {
+            std::unordered_map<Ref<BranchInstruction>, Ref<BranchInfo>, InstructionHasher<BranchInstruction>> branch_map{};
+        };
         struct ScopeInfo {
             Ref<RectifiedScope> scope;
             int64_t iterating;
-            Box<asmjit::Label> label;
+            Ref<BranchInstruction> branch_instruction;
+            Ref<BranchInfo> branch_info;
+            bool registered_begin;
         };
-        const x86_64PrimitiveConverter converter{};
+//        const x86_64PrimitiveConverter converter{};
     private:
+        static Ref<BranchesReport> create_branches_report(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                          const microjit::Ref<microjit::RectifiedFunction> &p_func);
         template<class T>
         static void copy_immediate_primitive(microjit::Box<asmjit::x86::Assembler> &assembler,
                                              const microjit::Ref<T> &p_instruction);
@@ -67,12 +83,12 @@ namespace microjit {
                                                  const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
                                                  const microjit::MicroJITCompiler_x86_64::ScopeInfo &p_current_scope);
         static void trampoline_caller(const std::function<void(microjit::VirtualStack*)>* p_trampoline, VirtualStack* p_stack);
-        static void assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
-                                             const Ref<StackFrameInfo>& p_frame_report,
-                                             const Ref<AssignInstruction> &p_instruction);
         static void copy_construct_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
                                                      const Ref<StackFrameInfo>& p_frame_report,
                                                      const Ref<CopyConstructInstruction> &p_instruction);
+        static void assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                             const Ref<StackFrameInfo>& p_frame_report,
+                                             const Ref<AssignInstruction> &p_instruction);
         static void assign_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
                                                     const Ref<StackFrameInfo>& p_frame_report,
                                                     const Ref<VariableInstruction> &p_target_var,
@@ -81,6 +97,18 @@ namespace microjit {
                                                               const Ref<StackFrameInfo>& p_frame_report,
                                                               const Ref<VariableInstruction> &p_instruction,
                                                               const Ref<PrimitiveBinaryOperation> &p_primitive_binary);
+        static void branch_eval_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                        const Ref<StackFrameInfo>& p_frame_report,
+                                                        const Ref<BranchesReport>& p_branches_report,
+                                                        const Ref<BranchInstruction> &p_target_var,
+                                                        const Ref<BranchInfo>& p_branch_info,
+                                                        const Ref<BinaryOperation> &p_binary);
+        static void branch_eval_primitive_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
+                                                                  const Ref<StackFrameInfo>& p_frame_report,
+                                                                   const Ref<BranchesReport>& p_branches_report,
+                                                                  const Ref<BranchInstruction> &p_instruction,
+                                                                   const Ref<BranchInfo>& p_branch_info,
+                                                                  const Ref<PrimitiveBinaryOperation> &p_primitive_binary);
     protected:
         CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const override;
     public:

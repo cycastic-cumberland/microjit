@@ -98,12 +98,11 @@ All instructions are issued through `Scope<R, Args...>`. All variables can only 
 - [x] Return value
 - [x] Orchestrator's basic functionalities
 - [x] Construction/Copy construction/Destruction
-- [x] Virtual stack injection/extraction
 - [x] Multiple scopes
-- [x] Type casting (Non-inline)
+- [x] Type casting/Coercion (Non-inline)
 - [x] Expressions
 - [x] Primitive Operations
-- [ ] Branches (if/else/for/while)
+- [x] Branches (if/else/while)
 - [x] JIT compiled function call
 - [x] Compile-and-go for JIT compiled function call
 - [ ] Native function call
@@ -111,10 +110,10 @@ All instructions are issued through `Scope<R, Args...>`. All variables can only 
 
 ### Advanced features
 
+- [ ] More optimizations
 - [ ] (Overloaded) Operations
 - [x] Asynchronous compilation
 - [ ] Function dependencies analysis
-- [ ] More optimizations
 - [ ] x86 and Windows support
 - TBA...
 

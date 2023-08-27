@@ -27,19 +27,14 @@ namespace microjit {
         static void ctor(T* p_obj) { new (p_obj) T(); }
         template<class T>
         static void copy_ctor(T* p_obj, const T* p_copy_target) { new (p_obj) T(*p_copy_target); }
-//        static void str_copy_constructor(char* p_obj, const char* p_copy_target) {
-//            size_t i = 0;
-//            while (auto c = (p_copy_target)[i++]){
-//                (p_obj)[i - 1] = c;
-//            }
-//            (p_obj)[i - 1] = 0;
-//        }
         template<class T>
         static void dtor(T* p_obj) { p_obj->~T(); }
         template<class T>
         static void assign(T* p_obj, const T* copy_target) { *p_obj = *copy_target; }
         template<typename From, typename To>
         static void convert(const From* p_from, To* p_to){ *p_to = To(*p_from); }
+        template<typename From, typename To>
+        static void coerce(const From* p_from, To* p_to){ *p_to = *(To*)p_from; }
 
         static void empty_ctor(void*) {  }
         static void empty_copy_ctor(void*, void*) {  }
@@ -139,8 +134,8 @@ namespace microjit {
             IT_PRIMITIVE_CONVERT,
             IT_INVOKE_JIT,
             IT_INVOKE_NATIVE,
-            IT_INVOKE_PREPACKED_NATIVE,
-            IT_OPERATION,
+            IT_BRANCH,
+            IT_BREAK,
         };
     private:
         const InstructionType type;
@@ -148,7 +143,7 @@ namespace microjit {
         uint32_t scope_offset{};
         friend class RectifiedScope;
     protected:
-        explicit TYPE_CONSTEXPR Instruction(const InstructionType& p_type) : type(p_type) {}
+        explicit TYPE_CONSTEXPR Instruction(InstructionType p_type) : type(p_type) {}
     public:
         _ALWAYS_INLINE_ InstructionType get_instruction_type() const { return type; }
         _ALWAYS_INLINE_ uint32_t get_scope_offset() const { return scope_offset; }
@@ -172,35 +167,40 @@ namespace microjit {
 
     class ArgumentsDeclaration : public ThreadUnsafeObject {
     private:
-        std::vector<Type> arg_types{};
-        std::vector<size_t> offsets{};
+        const std::vector<Type> arg_types;
+        const std::vector<size_t> offsets;
     private:
+        ArgumentsDeclaration(std::vector<Type>& p_types, std::vector<size_t>& p_offsets)
+            : arg_types(std::move(p_types)), offsets(std::move(p_offsets)) {}
         template<typename T>
-        _ALWAYS_INLINE_ void add_arg(){
+        static void add_arg(std::vector<Type>* p_vec) {
             static TYPE_CONSTEXPR auto void_type = Type::create<void>();
             static TYPE_CONSTEXPR auto curr_type = Type::create<T>();
             TYPE_ASSERT(void_type != curr_type);
-            arg_types.push_back(curr_type);
+            p_vec->push_back(curr_type);
         }
-        void create_indexes(){
-            offsets.resize(arg_types.size());
+        static void create_indexes(const std::vector<Type>* p_types, std::vector<size_t>* p_offsets){
+            p_offsets->resize(p_types->size());
             size_t current_offset = 0;
             // The stack growth downward
-            for (int64_t i = int64_t(offsets.size()) - 1; i >= 0; i--){
-                offsets[i] = current_offset;
-                current_offset += arg_types[i].size;
+            for (int64_t i = int64_t(p_offsets->size()) - 1; i >= 0; i--){
+                p_offsets->operator[](i) = current_offset;
+                current_offset += p_types->operator[](i).size;
             }
         }
-        ArgumentsDeclaration() = default;
     public:
-        const std::vector<Type>& argument_types() const { return arg_types; }
-        const std::vector<size_t>& argument_offsets() const { return offsets; }
+        _NO_DISCARD_ _ALWAYS_INLINE_ const std::vector<Type>& argument_types() const { return arg_types; }
+        _NO_DISCARD_ _ALWAYS_INLINE_ const std::vector<size_t>& argument_offsets() const { return offsets; }
 
         template<typename ...Args>
         static Ref<ArgumentsDeclaration> create(){
-            auto args = new ArgumentsDeclaration();
-            (args->add_arg<Args>(), ...);
-            args->create_indexes();
+            std::vector<Type> p_types;
+            std::vector<size_t> p_offsets;
+            p_types.reserve(sizeof...(Args));
+            p_offsets.reserve(sizeof...(Args));
+            (add_arg<Args>(&p_types), ...);
+            create_indexes(&p_types, &p_offsets);
+            auto args = new ArgumentsDeclaration(p_types, p_offsets);
             return Ref<ArgumentsDeclaration>::from_uninitialized_object(args);
         }
     };
@@ -323,8 +323,8 @@ namespace microjit {
             : Instruction(IT_CONVERT), from_var(p_from), to_var(p_to), converter(p_conv) {}
     public:
         template<typename From, typename To>
-        static Ref<ConvertInstruction> create(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
-            auto converter = ObjectTools::convert<From, To>;
+        static Ref<ConvertInstruction> create(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to, bool p_coerce){
+            auto converter = p_coerce ?  ObjectTools::coerce<From, To> : ObjectTools::convert<From, To>;
             auto ins = new ConvertInstruction(p_from, p_to, (const void*)converter);
             return Ref<ConvertInstruction>::from_uninitialized_object(ins);
         }
@@ -382,9 +382,9 @@ namespace microjit {
             BINARY_EQUAL,
             BINARY_NOT_EQUAL,
             BINARY_GREATER,
-            BINARY_GREATER_EQ,
+            BINARY_GREATER_OR_EQUAL,
             BINARY_LESSER,
-            BINARY_LESSER_EQ,
+            BINARY_LESSER_OR_EQUAL,
 
             BINARY_END,
 
@@ -589,12 +589,64 @@ namespace microjit {
         static Ref<AssignInstruction> create_expr_primitive(const Ref<VariableInstruction> &p_target, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
     };
 
+    class BranchInstruction : public Instruction {
+    public:
+        enum BranchType {
+            BRANCH_IF,
+            BRANCH_ELSE,
+            BRANCH_WHILE,
+        };
+        const BranchType branch_type;
+        const Ref<RectifiedScope> sub_scope;
+    private:
+    protected:
+        explicit BranchInstruction(BranchType p_type, const Ref<RectifiedScope>& p_sub_scope);
+    };
+
+    class IfInstruction : public BranchInstruction {
+    public:
+        const Ref<AbstractOperation> condition;
+    private:
+        IfInstruction(const Ref<AbstractOperation>& p_condition, const Ref<RectifiedScope>& p_scope)
+            : BranchInstruction(BRANCH_IF, p_scope), condition(p_condition) {}
+    public:
+        static Ref<IfInstruction> create(const Ref<AbstractOperation>& p_condition, const Ref<RectifiedScope>& p_scope);
+    };
+
+    class ElseInstruction : public BranchInstruction {
+    private:
+        explicit ElseInstruction(const Ref<RectifiedScope>& p_scope)
+                : BranchInstruction(BRANCH_ELSE, p_scope) {}
+    public:
+        static Ref<ElseInstruction> create(const Ref<RectifiedScope>& p_scope);
+    };
+
+    class WhileInstruction : public BranchInstruction {
+    public:
+        const Ref<AbstractOperation> condition;
+    private:
+        WhileInstruction(const Ref<AbstractOperation>& p_condition, const Ref<RectifiedScope>& p_scope)
+                : BranchInstruction(BRANCH_WHILE, p_scope), condition(p_condition) {}
+    public:
+        static Ref<WhileInstruction> create(const Ref<AbstractOperation>& p_condition, const Ref<RectifiedScope>& p_scope);
+    };
+
+    class BreakInstruction : public Instruction {
+    private:
+        BreakInstruction() : Instruction(IT_BREAK) {}
+    public:
+        static _ALWAYS_INLINE_ Ref<BreakInstruction> create(){
+            return Ref<BreakInstruction>::from_uninitialized_object(new BreakInstruction());
+        }
+    };
+
     class RectifiedScope : public ThreadUnsafeObject {
     private:
         const RectifiedScope* parent_scope;
         const Ref<ArgumentsDeclaration> arguments;
         std::vector<Ref<RectifiedScope>> directly_owned_scopes{};
         std::vector<Ref<VariableInstruction>> variables{};
+        std::vector<Ref<BranchInstruction>> branches{};
         std::vector<Ref<Instruction>> instructions{};
         uint32_t current_scope_offset{};
 
@@ -689,13 +741,13 @@ namespace microjit {
         }
         Ref<AssignInstruction> assign_from_primitive_atomic_expression(const Ref<VariableInstruction> &p_var, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
         template<typename From, typename To>
-        Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+        Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to, bool p_coerce){
             static TYPE_CONSTEXPR auto f_type = Type::create<From>();
             static TYPE_CONSTEXPR auto t_type = Type::create<To>();
             if (!has_variable_in_all_scope(p_from) || !has_variable_in_all_scope(p_to)) MJ_RAISE("Does not own target");
             if (p_from->type != f_type) MJ_RAISE("Mismatched 'from' type");
             if (p_to->type != t_type) MJ_RAISE("Mismatched 'to' type");
-            auto ins = ConvertInstruction::create<From, To>(p_from, p_to);
+            auto ins = ConvertInstruction::create<From, To>(p_from, p_to, p_coerce);
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
@@ -728,10 +780,17 @@ namespace microjit {
             return ins;
         }
         Ref<ScopeCreateInstruction> create_scope(const Ref<RectifiedScope>& p_child);
+        Ref<IfInstruction> if_branch(const AtomicBinaryExpressionParser::ParseResult& p_parse_result,
+                                     const microjit::Ref<microjit::RectifiedScope> &p_child);
+        Ref<ElseInstruction> else_branch(const microjit::Ref<microjit::RectifiedScope> &p_child);
+        Ref<WhileInstruction> while_branch(const AtomicBinaryExpressionParser::ParseResult& p_parse_result,
+                                           const microjit::Ref<microjit::RectifiedScope> &p_child);
+        Ref<BreakInstruction> break_loop();
         Ref<PrimitiveAtomicBinaryExpressionParser> create_primitive_binary_expression_parser() const;
 
         _NO_DISCARD_ const auto& get_instructions() const { return instructions; }
         _NO_DISCARD_ const auto& get_variables() const { return variables; }
+        _NO_DISCARD_ const auto& get_branches() const { return branches; }
         _NO_DISCARD_ const auto& get_scopes() const { return directly_owned_scopes; }
     };
 
@@ -806,12 +865,12 @@ namespace microjit {
             return rectified_scope->assign_from_primitive_atomic_expression(p_var, p_parse_result);
         }
         template<typename From, typename To>
-        Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
+        Ref<ConvertInstruction> convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to, bool p_coerce = false){
             TYPE_ASSERT(Type::create<From>() != Type::create<To>());
-            return rectified_scope->convert<From, To>(p_from, p_to);
+            return rectified_scope->convert<From, To>(p_from, p_to, p_coerce);
         }
         template<typename From, typename To>
-        [[deprecated("Primitive conversion currently does not work properly. Please use convert() for now")]]
+        [[deprecated("When Virtual Stack stop being supported, this method will straight up cause SIGSEGV")]]
         Ref<PrimitiveConvertInstruction> primitive_convert(const Ref<VariableInstruction>& p_from, const Ref<VariableInstruction>& p_to){
             TYPE_ASSERT(Type::create<From>() != Type::create<To>());
             return rectified_scope->primitive_convert<From, To>(p_from, p_to);
@@ -828,6 +887,25 @@ namespace microjit {
             auto new_scope = Ref<Scope<R, Args...>>::make_ref(parent_function, this);
             rectified_scope->create_scope(new_scope->rectified_scope);
             return new_scope;
+        }
+        Ref<Scope<R, Args...>> if_branch(const AtomicBinaryExpressionParser::ParseResult& p_parse_result){
+            // This could be optimized...
+            auto new_scope = Ref<Scope<R, Args...>>::make_ref(parent_function, this);
+            rectified_scope->if_branch(p_parse_result, new_scope->rectified_scope);
+            return new_scope;
+        }
+        Ref<Scope<R, Args...>> else_branch(){
+            auto new_scope = Ref<Scope<R, Args...>>::make_ref(parent_function, this);
+            rectified_scope->else_branch(new_scope->rectified_scope);
+            return new_scope;
+        }
+        Ref<Scope<R, Args...>> while_branch(const AtomicBinaryExpressionParser::ParseResult& p_parse_result){
+            auto new_scope = Ref<Scope<R, Args...>>::make_ref(parent_function, this);
+            rectified_scope->while_branch(p_parse_result, new_scope->rectified_scope);
+            return new_scope;
+        }
+        Ref<BreakInstruction> break_loop(){
+            return rectified_scope->break_loop();
         }
         Ref<PrimitiveAtomicBinaryExpressionParser> create_primitive_binary_expression_parser() const {
             return rectified_scope->create_primitive_binary_expression_parser();
