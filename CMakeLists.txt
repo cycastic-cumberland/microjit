@@ -65,6 +65,6 @@ add_custom_target(
         COMMENT "MicroJIT: Generating primitive converter"
 )
 
-add_dependencies(microjit generate_primitive_conversion_map generate_primitive_converter)
+#add_dependencies(microjit generate_primitive_conversion_map generate_primitive_converter)
 
 #target_link_libraries(microjit asmjit)

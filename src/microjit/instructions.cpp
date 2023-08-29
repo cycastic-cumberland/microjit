@@ -6,18 +6,20 @@
 #include "instructions.h"
 
 microjit::Ref<microjit::ArgumentValue> microjit::ArgumentValue::create(const uint32_t &p_idx) {
-    return Ref<ArgumentValue>::from_uninitialized_object(new ArgumentValue(p_idx));
+    auto ins = new ArgumentValue(p_idx);
+    return Ref<ArgumentValue>::from_uninitialized_object(ins);
 }
 
 microjit::Ref<microjit::CopyConstructInstruction>
 microjit::CopyConstructInstruction::create_arg(const microjit::RectifiedScope *p_scope,
                                            const microjit::Ref<microjit::VariableInstruction> &p_target,
-                                           const uint32_t &p_arg_idx) {
+                                           uint32_t p_arg_idx) {
     const auto& types = p_scope->get_arguments()->argument_types();
     if (types.size() <= p_arg_idx) MJ_RAISE("Invalid argument index");
     if (types[p_arg_idx] != p_target->type) MJ_RAISE("Mismatched type");
-    auto arg = ArgumentValue::create(p_arg_idx).c_style_cast<Value>();
-    auto ins = new CopyConstructInstruction(p_target, arg, (const void*)p_target->type.copy_constructor);
+    auto arg = ArgumentValue::create(p_arg_idx);
+    auto casted = arg.c_style_cast<Value>();
+    auto ins = new CopyConstructInstruction(p_target, casted, (const void*)p_target->type.copy_constructor);
     return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
 }
 
@@ -54,7 +56,8 @@ microjit::RectifiedScope::invoke_jit(const microjit::Ref<microjit::RectifiedFunc
 
 microjit::RectifiedScope::RectifiedScope(const microjit::Ref<microjit::ArgumentsDeclaration> &p_args,
                                          const microjit::RectifiedScope *p_parent)
-        : arguments(p_args), parent_scope(p_parent){}
+        : arguments(p_args), parent_scope(p_parent),
+          pabe_parser(Ref<PrimitiveAtomicBinaryExpressionParser>::from_uninitialized_object(new PrimitiveAtomicBinaryExpressionParser(this))){}
 
 bool
 microjit::RectifiedScope::has_variable_in_all_scope(const microjit::Ref<microjit::VariableInstruction> &p_var) const {
@@ -63,7 +66,7 @@ microjit::RectifiedScope::has_variable_in_all_scope(const microjit::Ref<microjit
 
 microjit::Ref<microjit::CopyConstructInstruction>
 microjit::RectifiedScope::construct_from_argument(const microjit::Ref<microjit::VariableInstruction> &p_var,
-                                                  const uint32_t &p_idx) {
+                                                  uint32_t p_idx) {
     if (!has_variable(p_var)) MJ_RAISE("Does not own variable");
     auto ins = CopyConstructInstruction::create_arg(this, p_var, p_idx);
     push_instruction(ins.template c_style_cast<Instruction>());
@@ -90,11 +93,6 @@ microjit::RectifiedScope::create_scope(const microjit::Ref<microjit::RectifiedSc
     return ins;
 }
 
-microjit::Ref<microjit::PrimitiveAtomicBinaryExpressionParser>
-microjit::RectifiedScope::create_primitive_binary_expression_parser() const {
-    auto parser = new PrimitiveAtomicBinaryExpressionParser(this);
-    return Ref<PrimitiveAtomicBinaryExpressionParser>::from_uninitialized_object(parser);
-}
 
 microjit::Ref<microjit::AssignInstruction> microjit::RectifiedScope::assign_from_primitive_atomic_expression(
         const microjit::Ref<microjit::VariableInstruction> &p_var,
@@ -168,8 +166,9 @@ microjit::Ref<microjit::BreakInstruction> microjit::RectifiedScope::break_loop()
 microjit::InvokeJitInstruction::InvokeJitInstruction(const microjit::Ref<microjit::RectifiedFunction> &p_func,
                                                      const microjit::Ref<microjit::ArgumentsVector> &p_args,
                                                      const Ref<VariableInstruction>& p_ret_var, const size_t& p_total_size)
-        : Instruction(IT_INVOKE_JIT), target_function(p_func), passed_arguments(p_args),
-          return_variable(p_ret_var), arguments_total_size(p_total_size) {}
+        : Instruction(IT_INVOKE_JIT), passed_arguments(p_args),
+          return_variable(p_ret_var), arguments_total_size(p_total_size),
+          target_trampoline(p_func->trampoline), target_return_type(p_func->return_type){}
 
 microjit::Ref<microjit::InvokeJitInstruction>
 microjit::InvokeJitInstruction::create(const Ref<ArgumentsDeclaration>& p_parent_args,
@@ -246,8 +245,8 @@ static _ALWAYS_INLINE_ void assert_type(microjit::Box<microjit::Type>& p_final_t
 
 #define BINARY_CHECK(m_op) if (!AbstractOperation::is_binary(m_op)) MJ_RAISE(#m_op " is not a binary operation")
 #define PABEP_FINALIZE()                                                                                                \
-    if (Type::is_floating_point(type) && p_op == AbstractOperation::BINARY_MOD)                                         \
-        MJ_RAISE("Floating point number does not have modulo operator");                                                \
+    if (Type::is_floating_point(type) && !(AbstractOperation::is_operation_floating_point_capable(p_op)))               \
+        MJ_RAISE("Floating point numbers are not capable of this operation");                                           \
     Type expr_ret = (AbstractOperation::operation_return_same(p_op) ? type                                              \
     : (AbstractOperation::operation_return_bool(p_op) ? Type::create<bool>() : Type::create<void>()));                  \
     auto expr = PrimitiveBinaryOperation::create(p_op, p_left.c_style_cast<Value>(), p_right.c_style_cast<Value>());    \
@@ -256,7 +255,7 @@ static _ALWAYS_INLINE_ void assert_type(microjit::Box<microjit::Type>& p_final_t
 microjit::AtomicBinaryExpressionParser::ParseResult
 microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperation::OperationType p_op,
                                                        const microjit::Ref<microjit::ImmediateValue> &p_left,
-                                                       const microjit::Ref<microjit::ImmediateValue> &p_right) {
+                                                       const microjit::Ref<microjit::ImmediateValue> &p_right) const {
     BINARY_CHECK(p_op);
     const auto type = p_left->imm_type;
     if (type != p_right->imm_type) MJ_RAISE("Mismatched type");
@@ -267,7 +266,7 @@ microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperati
 microjit::AtomicBinaryExpressionParser::ParseResult
 microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperation::OperationType p_op,
                                                        const microjit::Ref<microjit::ImmediateValue> &p_left,
-                                                       const microjit::Ref<microjit::VariableValue> &p_right) {
+                                                       const microjit::Ref<microjit::VariableValue> &p_right) const {
     BINARY_CHECK(p_op);
     if (!host_scope->has_variable_in_all_scope(p_right->variable))
         MJ_RAISE("Host scope does not own this variable");
@@ -280,7 +279,7 @@ microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperati
 microjit::AtomicBinaryExpressionParser::ParseResult
 microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperation::OperationType p_op,
                                                        const microjit::Ref<microjit::VariableValue> &p_left,
-                                                       const microjit::Ref<microjit::ImmediateValue> &p_right) {
+                                                       const microjit::Ref<microjit::ImmediateValue> &p_right) const {
     BINARY_CHECK(p_op);
     if (!host_scope->has_variable_in_all_scope(p_left->variable))
         MJ_RAISE("Host scope does not own this variable");
@@ -293,7 +292,7 @@ microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperati
 microjit::AtomicBinaryExpressionParser::ParseResult
 microjit::PrimitiveAtomicBinaryExpressionParser::parse(microjit::AbstractOperation::OperationType p_op,
                                                        const microjit::Ref<microjit::VariableValue> &p_left,
-                                                       const microjit::Ref<microjit::VariableValue> &p_right) {
+                                                       const microjit::Ref<microjit::VariableValue> &p_right) const {
     BINARY_CHECK(p_op);
     if (!host_scope->has_variable_in_all_scope(p_left->variable) ||
         !host_scope->has_variable_in_all_scope(p_right->variable))

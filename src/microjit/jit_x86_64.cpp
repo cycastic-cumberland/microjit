@@ -190,7 +190,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                             break;
                         }
                         case Value::VAL_ARGUMENT: {
-                            auto as_arg = as_cc->value_reference.safe_cast<ArgumentValue>();
+                            auto as_arg = as_cc->value_reference.c_style_cast<ArgumentValue>();
                             auto arg_offset = function_arguments->argument_offsets()[as_arg->argument_index];
                             arg_offset += p_func->return_type.size;
                             copy_construct_variable_internal(assembler, type, as_cc->ctor, vstack_offset, arg_offset);
@@ -306,13 +306,15 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                 }
                 case Instruction::IT_INVOKE_JIT: {
                     auto as_invocation = current_instruction.c_style_cast<InvokeJitInstruction>();
-                    const auto& p_target_func = as_invocation->target_function;
-                    AINL("Invoking JIT function " << std::to_string((size_t)as_invocation->target_function.ptr()));
+                    AINL("Invoking JIT function");
+                    const auto target_trampoline = as_invocation->target_trampoline;
+                    const auto target_return_type = as_invocation->target_return_type;
+                    AINL("Invoking JIT function " << std::to_string((size_t)as_invocation->target_function));
                     // Call's prologue
                     // r11 now hold old vrbp
                     AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
                     AIN(assembler->mov(rdi, VSTACK_LOC));
-                    AIN(assembler->mov(rsi, p_target_func->return_type.size + as_invocation->arguments_total_size));
+                    AIN(assembler->mov(rsi, target_return_type.size + as_invocation->arguments_total_size));
                     AIN(assembler->call(virtual_stack_create_stack_frame));
                     // Cache the new stack pointers
                     AIN(assembler->mov(rdi, VSTACK_LOC));
@@ -361,10 +363,10 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                                 MJ_RAISE("Passing expression as argument is not supported. Evaluate them first.");
                         }
                     }
-                    AIN(assembler->sub(asmjit::x86::r10, as_invocation->target_function->return_type.size));
+                    AIN(assembler->sub(asmjit::x86::r10, target_return_type.size));
                     // The stack setup process is finished
                     // Load trampoline to rdi
-                    AIN(assembler->mov(rdi, (size_t)(as_invocation->target_function->trampoline)));
+                    AIN(assembler->mov(rdi, (size_t)(target_trampoline)));
                     // Load VirtualStack to rsi
                     AIN(assembler->mov(rsi, VSTACK_LOC));
                     // Call the trampoline
@@ -420,7 +422,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     // The function collapse the stack frame before copying the return value
                     // There's no stack push in-between so there should be no problem
                     // If there is... you know where to look
-                    const auto func_ret_type = p_target_func->return_type;
+                    const auto func_ret_type = target_return_type;
                     if (func_ret_type.size > 0) {
                         AIN(assembler->sub(asmjit::x86::r10, func_ret_type.size));
                         // Copy the return value (if needed)
@@ -499,6 +501,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     break;
                 }
                 case Instruction::IT_BREAK: {
+                    // If there's no loop, just do nothing
                     if (loop_stack.empty()) break;
                     single_scope_destructor_call(assembler, frame_report, current);
                     auto top_most_loop = loop_stack.top();
@@ -765,7 +768,7 @@ microjit::MicroJITCompiler_x86_64::assign_binary_atomic_expression(Box<asmjit::x
 
 #define MOVE_PRIMITIVE_OPERAND(m_target_type, m_is_float, m_operand, m_float_type, m_int_type)          \
 {                                                                                                       \
-    static constexpr auto float_type = Type::create<float>();                                           \
+    static TYPE_CONSTEXPR auto float_type = Type::create<float>();                                      \
     if (m_is_float) {                                                                                   \
         const auto is_fp32 = (m_target_type == float_type);                                             \
         switch (m_operand->get_value_type()) {                                                          \

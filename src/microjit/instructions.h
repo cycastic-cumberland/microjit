@@ -151,7 +151,7 @@ namespace microjit {
 
     class Value : public ThreadUnsafeObject {
     public:
-        enum ValueType {
+        enum ValueType : uint32_t {
             VAL_IMMEDIATE,
             VAL_ARGUMENT,
             VAL_VARIABLE,
@@ -255,9 +255,9 @@ namespace microjit {
 
     class ArgumentValue : public Value {
     public:
-        const uint32_t& argument_index;
+        const uint32_t argument_index;
     private:
-        explicit ArgumentValue(const uint32_t& p_idx) : Value(VAL_ARGUMENT), argument_index(p_idx) {}
+        explicit ArgumentValue(uint32_t p_idx) : Value(VAL_ARGUMENT), argument_index(p_idx) {}
     public:
         static Ref<ArgumentValue> create(const uint32_t& p_idx);
     };
@@ -351,10 +351,28 @@ namespace microjit {
     public:
         std::vector<Ref<Value>> values;
         ArgumentsVector() : values() {  }
+    private:
+        explicit ArgumentsVector(std::vector<Ref<Value>>& p_values)
+            : values(std::move(p_values)) {}
+
+        template<class T>
+        static void add_to_vec(std::vector<Ref<Value>>& p_vec, const Ref<T>& p_val){
+            p_vec.push_back(p_val.template safe_cast<Value>());
+        }
+    public:
+        template<class ...Args>
+        static Ref<ArgumentsVector> create(Args... p_args){
+            std::vector<Ref<Value>> vec{};
+            vec.reserve(sizeof...(Args));
+            (add_to_vec(vec, p_args), ...);
+            auto ins = new ArgumentsVector(vec);
+            return Ref<ArgumentsVector>::from_uninitialized_object(ins);
+        }
     };
     class InvokeJitInstruction : public Instruction {
     public:
-        const Ref<RectifiedFunction> target_function;
+        const std::function<void(VirtualStack*)>* target_trampoline;
+        const Type target_return_type;
         const Ref<VariableInstruction> return_variable;
         const Ref<ArgumentsVector> passed_arguments;
         const size_t arguments_total_size{};
@@ -388,12 +406,6 @@ namespace microjit {
 
             BINARY_END,
 
-            UNARY_COMPOUND_ADD,
-            UNARY_COMPOUND_SUB,
-            UNARY_COMPOUND_MUL,
-            UNARY_COMPOUND_DIV,
-            UNARY_COMPOUND_MOD,
-
             OP_END,
         };
         enum OperationMask : uint32_t {
@@ -401,28 +413,23 @@ namespace microjit {
             RET_BOOLEAN = 2,
             RET_NONE = 4,
             READ_ONLY = 8,
+            FLOATING_POINT_CAPABLE = 16,
         };
         static constexpr uint32_t operation_masks[OP_END] {
-                RET_SAME_TYPE | READ_ONLY,
-                RET_SAME_TYPE | READ_ONLY,
-                RET_SAME_TYPE | READ_ONLY,
-                RET_SAME_TYPE | READ_ONLY,
+                RET_SAME_TYPE | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_SAME_TYPE | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_SAME_TYPE | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_SAME_TYPE | READ_ONLY | FLOATING_POINT_CAPABLE,
                 RET_SAME_TYPE | READ_ONLY,
 
-                RET_BOOLEAN | READ_ONLY,
-                RET_BOOLEAN | READ_ONLY,
-                RET_BOOLEAN | READ_ONLY,
-                RET_BOOLEAN | READ_ONLY,
-                RET_BOOLEAN | READ_ONLY,
-                RET_BOOLEAN | READ_ONLY,
+                RET_BOOLEAN | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_BOOLEAN | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_BOOLEAN | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_BOOLEAN | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_BOOLEAN | READ_ONLY | FLOATING_POINT_CAPABLE,
+                RET_BOOLEAN | READ_ONLY | FLOATING_POINT_CAPABLE,
 
-                RET_NONE, // BINARY_END
-
-                RET_NONE,
-                RET_NONE,
-                RET_NONE,
-                RET_NONE,
-                RET_NONE,
+                0, // BINARY_END
         };
         const OperationType operation_type;
     protected:
@@ -437,6 +444,9 @@ namespace microjit {
         }
         _NO_DISCARD_ static _ALWAYS_INLINE_ bool is_operation_read_only(OperationType p_op) {
             return  (operation_masks[p_op] & READ_ONLY);
+        }
+        _NO_DISCARD_ static _ALWAYS_INLINE_ bool is_operation_floating_point_capable(OperationType p_op) {
+            return  (operation_masks[p_op] & FLOATING_POINT_CAPABLE);
         }
         _NO_DISCARD_ static _ALWAYS_INLINE_ bool operation_does_return(OperationType p_op) {
             return !(operation_masks[p_op] & RET_NONE);
@@ -497,7 +507,7 @@ namespace microjit {
                 : expression(p_expr), return_type(p_type), host(p_host) {}
         };
     protected:
-        _NO_DISCARD_ _ALWAYS_INLINE_ ParseResult create_result(const Ref<AbstractOperation>& p_expr, Type p_type){
+        _NO_DISCARD_ _ALWAYS_INLINE_ ParseResult create_result(const Ref<AbstractOperation>& p_expr, Type p_type) const {
             return { p_expr, p_type, host_scope };
         }
     public:
@@ -505,10 +515,10 @@ namespace microjit {
         // This is to make sure no one tries to sneak in an expression as value
         // Yes, I could have let all of them passed as Ref<Value>, and use dynamic_cast to check,
         // but that would not be as performance
-        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<ImmediateValue>& p_right) = 0;
-        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<VariableValue>& p_right) = 0;
-        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<ImmediateValue>& p_right) = 0;
-        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<VariableValue>& p_right) = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<ImmediateValue>& p_right) const = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<VariableValue>& p_right) const = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<ImmediateValue>& p_right) const = 0;
+        virtual ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<VariableValue>& p_right) const = 0;
     };
     class PrimitiveAtomicBinaryExpressionParser : public AtomicBinaryExpressionParser {
     private:
@@ -516,10 +526,10 @@ namespace microjit {
         friend class RectifiedScope;
     public:
 
-        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<ImmediateValue>& p_right) override;
-        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<VariableValue>& p_right) override;
-        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<ImmediateValue>& p_right) override;
-        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<VariableValue>& p_right) override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<ImmediateValue>& p_right) const override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<ImmediateValue>& p_left, const Ref<VariableValue>& p_right) const override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<ImmediateValue>& p_right) const override;
+        ParseResult parse(AbstractOperation::OperationType p_op, const Ref<VariableValue>& p_left, const Ref<VariableValue>& p_right) const override;
     };
 
     class CopyConstructInstruction : public Instruction {
@@ -540,7 +550,7 @@ namespace microjit {
             auto ins = new CopyConstructInstruction(p_target, as_value, (const void*)p_target->type.copy_constructor);
             return Ref<CopyConstructInstruction>::from_uninitialized_object(ins);
         }
-        static Ref<CopyConstructInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, const uint32_t& p_arg_idx);
+        static Ref<CopyConstructInstruction> create_arg(const RectifiedScope* p_scope, const Ref<VariableInstruction>& p_target, uint32_t p_arg_idx);
         static Ref<CopyConstructInstruction> create_var(const Ref<VariableInstruction> &p_target, const Ref<VariableInstruction> &p_assign_target);
         static Ref<CopyConstructInstruction> create_expr_primitive(const Ref<VariableInstruction> &p_target, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
     };
@@ -644,6 +654,7 @@ namespace microjit {
     private:
         const RectifiedScope* parent_scope;
         const Ref<ArgumentsDeclaration> arguments;
+        const Ref<PrimitiveAtomicBinaryExpressionParser> pabe_parser;
         std::vector<Ref<RectifiedScope>> directly_owned_scopes{};
         std::vector<Ref<VariableInstruction>> variables{};
         std::vector<Ref<BranchInstruction>> branches{};
@@ -690,7 +701,7 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
-        Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx);
+        Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, uint32_t p_idx);
         Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target);
         Ref<CopyConstructInstruction> construct_from_primitive_atomic_expression(const Ref<VariableInstruction> &p_var, const AtomicBinaryExpressionParser::ParseResult& p_parse_result);
         template<typename T>
@@ -786,7 +797,9 @@ namespace microjit {
         Ref<WhileInstruction> while_branch(const AtomicBinaryExpressionParser::ParseResult& p_parse_result,
                                            const microjit::Ref<microjit::RectifiedScope> &p_child);
         Ref<BreakInstruction> break_loop();
-        Ref<PrimitiveAtomicBinaryExpressionParser> create_primitive_binary_expression_parser() const;
+        _ALWAYS_INLINE_ Ref<PrimitiveAtomicBinaryExpressionParser> primitive_binary_expression_parser() const {
+            return pabe_parser;
+        }
 
         _NO_DISCARD_ const auto& get_instructions() const { return instructions; }
         _NO_DISCARD_ const auto& get_variables() const { return variables; }
@@ -828,7 +841,7 @@ namespace microjit {
         Ref<CopyConstructInstruction> construct_from_immediate(const Ref<VariableInstruction>& p_var, const T& p_imm){
             return rectified_scope->construct_from_immediate<T>(p_var, p_imm);
         }
-        Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, const uint32_t& p_idx){
+        Ref<CopyConstructInstruction> construct_from_argument(const Ref<VariableInstruction>& p_var, uint32_t p_idx){
             return rectified_scope->construct_from_argument(p_var, p_idx);
         }
         Ref<CopyConstructInstruction> construct_from_variable(const Ref<VariableInstruction>& p_var, const Ref<VariableInstruction>& p_copy_target){
@@ -907,8 +920,8 @@ namespace microjit {
         Ref<BreakInstruction> break_loop(){
             return rectified_scope->break_loop();
         }
-        Ref<PrimitiveAtomicBinaryExpressionParser> create_primitive_binary_expression_parser() const {
-            return rectified_scope->create_primitive_binary_expression_parser();
+        Ref<PrimitiveAtomicBinaryExpressionParser> primitive_binary_expression_parser() const {
+            return rectified_scope->primitive_binary_expression_parser();
         }
         _NO_DISCARD_ Ref<RectifiedScope> get_rectified_scope() const { return rectified_scope; }
     };

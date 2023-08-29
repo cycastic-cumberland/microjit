@@ -49,8 +49,8 @@ namespace microjit {
             ~FunctionInstance() override = default;
 
             Ref<Function<R, Args...>> get_function() const { return function; }
-            R call(Args&&... args) const;
-            R call_with_vstack(VirtualStack* p_stack, Args&&... args) const;
+            R call(Args... args) const;
+            R call_with_vstack(VirtualStack* p_stack, Args... args) const;
             void recompile() const;
             void detach();
             // Not atomically counted for performance reasons
@@ -83,6 +83,7 @@ namespace microjit {
             _NO_DISCARD_ const FunctionInstance<R, Args...>* operator*() const { return ptr(); }
             void recompile() const { instance->recompile(); }
             void detach() { instance->detach(); }
+            Ref<FunctionInstance<R, Args...>> unwrap() const { return instance; }
             std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
                 return instance->get_full_compiled_function();
             }
@@ -230,13 +231,13 @@ namespace microjit {
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
     R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call_with_vstack(VirtualStack *p_stack,
-                                                                                        Args &&... args) const {
+                                                                                        Args... args) const {
         return (get_full_compiled_function())(p_stack, std::forward<Args>(args)...);
     }
 
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
-    R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call(Args &&... args) const {
+    R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call(Args... args) const {
         return (get_compiled_function())(std::forward<Args>(args)...);
     }
 
@@ -363,6 +364,7 @@ namespace microjit {
 #endif
 
 namespace microjit {
-    static _ALWAYS_INLINE_ Ref<MicroJITOrchestrator> orchestrator() { return Ref<MicroJITOrchestrator>::make_ref(); }
+    template<typename ...Args>
+    static _ALWAYS_INLINE_ Ref<MicroJITOrchestrator> orchestrator(Args&&...args) { return Ref<MicroJITOrchestrator>::make_ref(args...); }
 }
 #endif //MICROJIT_ORCHESTRATOR_H

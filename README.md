@@ -124,7 +124,7 @@ This library has been tested on the following target(s):
 |        | gcc (Linux) | clang (Linux) | MSVC (Windows) | MinGW (Windows) |
 |--------|:-----------:|:-------------:|:--------------:|-----------------|
 | x86    |             |               |                |                 |
-| x86_64 |   &#215;    |   &#10004;    |       *        |                 |
+| x86_64 |  &#10004;   |   &#10004;    |       *        |                 |
 
 *: The example worked on Windows using MSVC, but I've yet to run the whole test suite
 
