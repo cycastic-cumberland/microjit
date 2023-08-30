@@ -31,6 +31,7 @@ namespace microjit {
         private:
             const OrchestratorComponent* parent;
             const Ref<Function<R, Args...>> function;
+            const Ref<JitFunctionTrampoline> trampoline;
             mutable std::function<R(VirtualStack*, Args...)> compiled_function{};
             mutable VirtualStackFunction real_compiled_function{};
             mutable size_t invocation_count{};
@@ -44,6 +45,8 @@ namespace microjit {
             void compile_internal(std::function<R2(VirtualStack*, Args2...)>* p_func, VirtualStackFunction p_cb) const;
             template<typename ...Args2>
             void compile_internal(std::function<void(VirtualStack*, Args2...)>* p_func, VirtualStackFunction p_cb) const;
+
+            static void static_recompile(const FunctionInstance* p_self);
         public:
             explicit FunctionInstance(const OrchestratorComponent* p_orchestrator);
             ~FunctionInstance() override = default;
@@ -198,21 +201,9 @@ namespace microjit {
     OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::FunctionInstance(
             const OrchestratorComponent *p_orchestrator)
             : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()},
-              settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()) {
-        function->get_trampoline() = [this](VirtualStack* p_stack) -> void {
-            auto** vrsp_ptr = p_stack->rsp();
-            auto** vrbp_ptr = p_stack->rbp();
-            auto old_rsp = *vrsp_ptr;
-            auto old_rbp = *vrbp_ptr;
-            // Using the real stack to cache old vrbp address
-            // mov rbp, rsp
-            *vrbp_ptr = old_rsp;
-            compile_internal(&compiled_function);
-            real_compiled_function(p_stack);
-            invocation_count++;
-            *vrsp_ptr = old_rsp;
-            *vrbp_ptr = old_rbp;
-        };
+              settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()),
+              trampoline(JitFunctionTrampoline::create(this, static_recompile, &real_compiled_function)) {
+        function->get_trampoline() = trampoline;
     }
 
     template<class CompilerTy, class RefCounter>
@@ -226,6 +217,13 @@ namespace microjit {
         std::function<R(VirtualStack*, Args...)> dummy{};
         compiled_function.swap(dummy);
         compile_internal(&compiled_function);
+    }
+
+    template<class TCompiler, class TRefCounter>
+    template<typename R, typename... Args>
+    void OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...>::static_recompile(
+            const OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...> *p_self) {
+        p_self->compile_internal(&p_self->compiled_function);
     }
 
     template<class CompilerTy, class RefCounter>

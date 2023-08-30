@@ -4,8 +4,6 @@
 MicroJIT is a lightweight Dynamic Compilation Library designed to enable developers
 with efficient runtime code generation.
 
-**This project is in the early stage of its lifetime so most features currently do not work, correctly or at all**
-
 ## Requirement
 
 MicroJIT makes extensive use of variadic template and attributes, which require C++ 17 or above.

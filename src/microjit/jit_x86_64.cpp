@@ -351,7 +351,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     AIN(assembler->sub(asmjit::x86::r10, target_return_type.size));
                     // The stack setup process is finished
                     // Load trampoline to rdi
-                    AIN(assembler->mov(rdi, (size_t)(target_trampoline)));
+                    AIN(assembler->mov(rdi, (size_t)(target_trampoline.ptr())));
                     // Load VirtualStack to rsi
                     AIN(assembler->mov(rsi, VSTACK_LOC));
                     // Call the trampoline
@@ -696,9 +696,11 @@ void microjit::MicroJITCompiler_x86_64::copy_immediate_internal(microjit::Box<as
     AIN(assembler->add(asmjit::x86::rsp, type_data.size));
 }
 
-void microjit::MicroJITCompiler_x86_64::trampoline_caller(const std::function<void(microjit::VirtualStack*)> *p_trampoline,
+void microjit::MicroJITCompiler_x86_64::trampoline_caller(BaseTrampoline* p_trampoline,
                                                           microjit::VirtualStack *p_stack) {
-    p_trampoline->operator()(p_stack);
+    auto as_jit_tramp = (microjit::JitFunctionTrampoline*)p_trampoline;
+    auto cb = &microjit::JitFunctionTrampoline::call_final;
+    (as_jit_tramp->*cb)(p_stack);
 }
 
 void microjit::MicroJITCompiler_x86_64::assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,

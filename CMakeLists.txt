@@ -47,6 +47,8 @@ add_library(microjit
         src/microjit/command_queue.h
         src/microjit/runtime_agent.cpp
         src/microjit/decaying_weighted_cache.h
+        src/microjit/trampoline.h
+        src/microjit/type.h
 )
 
 set(PYTHON_EXECUTABLE python)

@@ -46,7 +46,8 @@ microjit::Ref<microjit::InvokeJitInstruction>
 microjit::RectifiedScope::invoke_jit(const microjit::Ref<microjit::RectifiedFunction> &p_func,
                                      const microjit::Ref<microjit::ArgumentsVector> &p_args,
                                      const Ref<VariableInstruction>& p_ret_var) {
-    if (!p_func->trampoline) MJ_RAISE("p_func does not have a trampoline function. "
+
+    if (p_func->trampoline.is_null()) MJ_RAISE("p_func does not have a trampoline function. "
                                       "invoke_jit can only be called on functions that are created by the Orchestrator.");
     auto args = p_args.is_valid() ? p_args : Ref<ArgumentsVector>::make_ref();
     auto ins = InvokeJitInstruction::create(arguments, p_func, args, p_ret_var);
