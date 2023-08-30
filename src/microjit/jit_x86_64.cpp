@@ -23,28 +23,17 @@ static constexpr auto xmm1 = asmjit::x86::xmm1;
 static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
 
 #define VSTACK_LOC asmjit::x86::qword_ptr(rbp, -ptrs)
-#define LOAD_VRBP_LOC (-(ptrs * 4))
-#define STORE_VRBP asmjit::x86::qword_ptr(rbp, -(ptrs * 2))
-#define STORE_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 3))
+#define LOAD_VRBP_LOC (-(ptrs * 2))
 #define LOAD_VRBP asmjit::x86::qword_ptr(rbp, LOAD_VRBP_LOC)
-#define LOAD_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 5))
+#define LOAD_VRSP asmjit::x86::qword_ptr(rbp, -(ptrs * 3))
 
 #define VSTACK_SETUP()                                      \
     AIN(assembler->call(virtual_stack_get_rbp));            \
-    AIN(assembler->mov(STORE_VRBP, rax));                   \
     AIN(assembler->mov(rbx, asmjit::x86::qword_ptr(rax)));  \
     AIN(assembler->mov(LOAD_VRBP, rbx));                    \
     AIN(assembler->call(virtual_stack_get_rsp));            \
-    AIN(assembler->mov(STORE_VRSP, rax));                   \
     AIN(assembler->mov(rbx, asmjit::x86::qword_ptr(rax)));  \
     AIN(assembler->mov(LOAD_VRSP, rbx));
-
-#define RESIZE_VSTACK(m_amount)                             \
-    AIN(assembler->mov(rbx, LOAD_VRSP));                    \
-    AIN(assembler->sub(rbx, (m_amount)));                   \
-    AIN(assembler->mov(rcx, STORE_VRSP));                   \
-    AIN(assembler->mov(asmjit::x86::qword_ptr(rcx), rbx));  \
-    AIN(assembler->mov(LOAD_VRSP, rbx))
 
 #define VAR_COPY(m_size, m_primitive, m_copy)                                                    \
     if (!(m_primitive)){                                                                            \
@@ -69,6 +58,8 @@ static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
                 AIN(assembler->mov(asmjit::x86::rdx, asmjit::x86::qword_ptr(asmjit::x86::rcx)));    \
                 AIN(assembler->mov(asmjit::x86::qword_ptr(rbx), asmjit::x86::rdx));                 \
                 break;                                                                              \
+            default:                                                                                \
+                MJ_RAISE("Unsupported primitive size");                                             \
         }                                                                                           \
     }
 
@@ -108,10 +99,12 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     }
     auto& assembler = assembly->assembler;
 
+    auto frame_report = create_frame_report(p_func);
+
     AINL("Prologue");
     AIN(assembler->push(rbp));
     AIN(assembler->mov(rbp, rsp));
-    AIN(assembler->sub(rsp, ptrs * 5));
+    AIN(assembler->sub(rsp, frame_report->max_frame_size));
 
     AINL("Setting up virtual stack");
     // Move the VirtualStack pointer from the first argument (rdi)
@@ -137,14 +130,8 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
 #endif
 
     const auto& function_arguments = p_func->arguments;
-
-    auto frame_report = create_frame_report(p_func);
     auto branches_report = create_branches_report(assembler, p_func);
     const auto& offset_map = frame_report->variable_map;
-    if (frame_report->max_frame_size){
-        AINL("Resizing virtual stack");
-        RESIZE_VSTACK(frame_report->max_frame_size);
-    }
 
     auto exit_label = assembler->newLabel();
     std::stack<ScopeInfo> scope_stack{};
@@ -168,22 +155,19 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                 case Instruction::IT_CONSTRUCT: {
                     AINL("Constructing variable " << (size_t)current_instruction.ptr());
                     auto as_ctor = current_instruction.c_style_cast<ConstructInstruction>();
-                    auto vstack_offset = offset_map.at(as_ctor->target_variable);
-                    AIN(assembler->mov(rdi, LOAD_VRBP));
-                    AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                    auto stack_offset = offset_map.at(as_ctor->target_variable);
+                    AIN(assembler->lea(rdi, asmjit::x86::qword_ptr(rbp, stack_offset)));
                     AIN(assembler->call(as_ctor->ctor));
-
                     break;
                 }
                 case Instruction::IT_COPY_CONSTRUCT: {
                     auto as_cc = current_instruction.c_style_cast<CopyConstructInstruction>();
                     auto type = as_cc->target_variable->type;
                     AINL("Copy constructing variable " << (size_t)as_cc->target_variable.ptr());
-                    auto vstack_offset = offset_map.at(as_cc->target_variable);
+                    auto stack_offset = offset_map.at(as_cc->target_variable);
                     switch (as_cc->value_reference->get_value_type()) {
                         case Value::VAL_IMMEDIATE: {
-                            AIN(assembler->mov(rdi, LOAD_VRBP));
-                            AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+                            AIN(assembler->lea(rdi, asmjit::x86::qword_ptr(rbp, stack_offset)));
                             if (as_cc->target_variable->type.is_primitive)
                                 copy_immediate_primitive(assembler, as_cc);
                             else copy_immediate(assembler, as_cc);
@@ -193,14 +177,17 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                             auto as_arg = as_cc->value_reference.c_style_cast<ArgumentValue>();
                             auto arg_offset = function_arguments->argument_offsets()[as_arg->argument_index];
                             arg_offset += p_func->return_type.size;
-                            copy_construct_variable_internal(assembler, type, as_cc->ctor, vstack_offset, arg_offset);
+                            copy_construct_variable_internal(assembler, type, as_cc->ctor,
+                                                             { RelativeObject::STACK_BASE_PTR, stack_offset },
+                                                             { RelativeObject::VIRTUAL_STACK_BASE_PTR, static_cast<int64_t>(arg_offset) });
                             break;
                         }
                         case Value::VAL_VARIABLE: {
                             auto as_var_val = as_cc->value_reference.c_style_cast<VariableValue>();
                             auto copy_target_offset = offset_map.at(as_var_val->variable);
-                            copy_construct_variable_internal(assembler, type, as_cc->ctor, vstack_offset,
-                                                             copy_target_offset);
+                            copy_construct_variable_internal(assembler, type, as_cc->ctor,
+                                                             { RelativeObject::STACK_BASE_PTR, stack_offset },
+                                                             { RelativeObject::STACK_BASE_PTR, copy_target_offset });
                             break;
                         }
                         case Value::VAL_EXPRESSION: {
@@ -212,12 +199,12 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                 case Instruction::IT_ASSIGN: {
                     auto as_assign = current_instruction.c_style_cast<AssignInstruction>();
                     AINL("Assigning variable " << (size_t)as_assign->target_variable.ptr());
-                    auto vstack_offset = offset_map.at(as_assign->target_variable);
+                    auto stack_offset = offset_map.at(as_assign->target_variable);
+                    auto type = as_assign->target_variable->type;
                     switch (as_assign->value_reference->get_value_type()) {
                         case Value::VAL_IMMEDIATE: {
-                            AIN(assembler->mov(rdi, LOAD_VRBP));
-                            AIN(assembler->sub(rdi, std::abs(vstack_offset)));
-                            if (as_assign->target_variable->type.is_primitive)
+                            AIN(assembler->lea(rdi, asmjit::x86::qword_ptr(rbp, stack_offset)));
+                            if (type.is_primitive)
                                 copy_immediate_primitive(assembler, as_assign);
                             else copy_immediate(assembler, as_assign);
                             break;
@@ -226,14 +213,17 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                             auto as_arg = as_assign->value_reference.c_style_cast<ArgumentValue>();
                             auto arg_offset = function_arguments->argument_offsets()[as_arg->argument_index];
                             arg_offset += p_func->return_type.size;
-                            assign_variable(assembler, as_assign, vstack_offset, arg_offset);
+                            copy_construct_variable_internal(assembler, type, as_assign->ctor,
+                                                             { RelativeObject::STACK_BASE_PTR, stack_offset },
+                                                             { RelativeObject::VIRTUAL_STACK_BASE_PTR, static_cast<int64_t>(arg_offset) });
                             break;
                         }
                         case Value::VAL_VARIABLE: {
                             auto as_var_val = as_assign->value_reference.c_style_cast<VariableValue>();
                             auto copy_target_offset = offset_map.at(as_var_val->variable);
-                            assign_variable(assembler, as_assign, vstack_offset,
-                                            copy_target_offset);
+                            copy_construct_variable_internal(assembler, type, as_assign->ctor,
+                                                             { RelativeObject::STACK_BASE_PTR, stack_offset },
+                                                             { RelativeObject::STACK_BASE_PTR, copy_target_offset });
                             break;
                         }
                         case Value::VAL_EXPRESSION: {
@@ -250,10 +240,9 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     if (p_func->return_type.size > 0) {
                         const auto& return_variable = as_return->return_var;
                         const auto type = return_variable->type;
-                        auto vstack_offset = offset_map.at(return_variable);
-                        AIN(assembler->mov(rcx, LOAD_VRBP));
-                        AIN(assembler->mov(rbx, rcx));
-                        AIN(assembler->sub(rcx, std::abs(vstack_offset)));
+                        auto stack_offset = offset_map.at(return_variable);
+                        AIN(assembler->mov(rbx, LOAD_VRBP));
+                        AIN(assembler->lea(rcx, asmjit::x86::qword_ptr(rbp, stack_offset)));
                         VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
                     }
 
@@ -288,10 +277,8 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     AINL("Converting variable " << std::to_string((size_t)as_convert->from_var.ptr()) << " to variable " << std::to_string((size_t)as_convert->to_var.ptr()));
                     auto from_offset = offset_map.at(as_convert->from_var);
                     auto to_offset = offset_map.at(as_convert->to_var);
-                    AIN(assembler->mov(rdi, LOAD_VRBP));
-                    AIN(assembler->mov(rsi, rdi));
-                    AIN(assembler->sub(rdi, std::abs(from_offset)));
-                    AIN(assembler->sub(rsi, std::abs(to_offset)));
+                    AIN(assembler->lea(rdi, asmjit::x86::qword_ptr(rbp, from_offset)));
+                    AIN(assembler->lea(rsi, asmjit::x86::qword_ptr(rbp, to_offset)));
                     AIN(assembler->call(as_convert->converter));
                     break;
                 }
@@ -340,11 +327,11 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                                 auto arg_offset = function_arguments->argument_offsets()[idx];
                                 arg_offset += p_func->return_type.size;
                                 AIN(assembler->sub(asmjit::x86::r10, arg_size));
-                                AIN(assembler->mov(rdi, asmjit::x86::r10));
-                                AIN(assembler->mov(rsi, asmjit::x86::r11));
-                                AIN(assembler->add(rsi, arg_offset));
-                                // TODO: primitive support
-                                AIN(assembler->call(type.copy_constructor));
+                                AIN(assembler->mov(rbx, asmjit::x86::r10));
+                                // Load argument from Virtual stack
+                                AIN(assembler->mov(rcx, asmjit::x86::r11));
+                                AIN(assembler->add(rcx, arg_offset));
+                                VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
                                 break;
                             }
                             case Value::VAL_VARIABLE: {
@@ -352,11 +339,9 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                                 auto stack_offset = frame_report->variable_map.at(as_var->variable);
                                 const auto type = as_var->variable->type;
                                 AIN(assembler->sub(asmjit::x86::r10, type.size));
-                                AIN(assembler->mov(rdi, asmjit::x86::r10));
-                                AIN(assembler->mov(rsi, asmjit::x86::r11));
-                                AIN(assembler->sub(rsi, std::abs(stack_offset)));
-                                // TODO: primitive support
-                                AIN(assembler->call(type.copy_constructor));
+                                AIN(assembler->mov(rbx, asmjit::x86::r10));
+                                AIN(assembler->lea(rcx, asmjit::x86::qword_ptr(rbp, stack_offset)));
+                                VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
                                 break;
                             }
                             case Value::VAL_EXPRESSION:
@@ -428,17 +413,13 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                         // Copy the return value (if needed)
                         auto return_var = as_invocation->return_variable;
                         if (return_var.is_valid()){
-                            // rax now hold original vrbp
-                            AIN(assembler->mov(rdi, asmjit::x86::r11));
-                            // Return variables are copy constructed,
-                            // so make sure not to construct them beforehand
                             auto ret_var_offset = frame_report->variable_map.at(return_var);
-                            // Construct target in rdi
-                            AIN(assembler->sub(rdi, std::abs(ret_var_offset)));
-                            // Copy target in rsi
-                            AIN(assembler->mov(rsi, asmjit::x86::r10));
+                            // Load variable address to rbx
+                            AIN(assembler->lea(rbx, asmjit::x86::qword_ptr(rbp, ret_var_offset)));
+                            AIN(assembler->mov(rcx, asmjit::x86::r10));
                             // Copy return value into variable
-                            AIN(assembler->call(return_var->type.copy_constructor));
+                            auto type = return_var->type;
+                            VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
                         }
                         if (!func_ret_type.is_primitive) {
                             // Cleanup the return value (if there's any)
@@ -571,40 +552,47 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
 void microjit::MicroJITCompiler_x86_64::copy_construct_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                                          const Type& p_type,
                                                                          const void* p_copy_constructor,
-                                                                         const int64_t& p_offset,
-                                                                         const int64_t& p_copy_target) {
-    AIN(assembler->mov(rbx, LOAD_VRBP));
-    AIN(assembler->mov(rcx, rbx));
-    AIN(assembler->sub(rbx, std::abs(p_offset)));
-    // argument_offset = return_size + relative_offset
-    if (p_copy_target >= 0) {
-        AIN(assembler->add(rcx, p_copy_target));
+                                                                         RelativeObject p_receive_target,
+                                                                         RelativeObject p_copy_target) {
+    if (p_receive_target.unit == RelativeObject::VIRTUAL_STACK_BASE_PTR ||
+        p_copy_target.unit == RelativeObject::VIRTUAL_STACK_BASE_PTR) {
+        AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
+    }
+    if (p_receive_target.unit == RelativeObject::STACK_BASE_PTR) {
+        AIN(assembler->lea(rbx, asmjit::x86::qword_ptr(rbp, p_receive_target.offset)));
     } else {
-        AIN(assembler->sub(rcx, std::abs(p_copy_target)));
+        AIN(assembler->mov(rbx, asmjit::x86::r10));
+        if (p_receive_target.offset < 0)
+            AIN(assembler->sub(rbx, std::abs(p_receive_target.offset)));
+        else
+            AIN(assembler->add(rbx, p_receive_target.offset));
+    }
+
+    if (p_copy_target.unit == RelativeObject::STACK_BASE_PTR) {
+        AIN(assembler->lea(rcx, asmjit::x86::qword_ptr(rbp, p_copy_target.offset)));
+    } else {
+        AIN(assembler->mov(rcx, asmjit::x86::r10));
+        if (p_copy_target.offset < 0)
+            AIN(assembler->sub(rcx, std::abs(p_copy_target.offset)));
+        else
+            AIN(assembler->add(rcx, p_copy_target.offset));
     }
     VAR_COPY(p_type.size, p_type.is_primitive, p_copy_constructor);
 }
 
-void microjit::MicroJITCompiler_x86_64::assign_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                                                 const microjit::Type &p_type, const void *p_operator,
-                                                                 const int64_t &p_offset, const int64_t &p_copy_target) {
-    AIN(assembler->mov(rbx, LOAD_VRBP));
-    AIN(assembler->mov(rcx, rbx));
-    AIN(assembler->sub(rbx, std::abs(p_offset)));
-    if (p_copy_target >= 0) {
-        AIN(assembler->add(rcx, p_copy_target));
-    } else {
-        AIN(assembler->sub(rcx, std::abs(p_copy_target)));
-    }
-    VAR_COPY(p_type.size, p_type.is_primitive, p_operator);
-}
-
-void microjit::MicroJITCompiler_x86_64::assign_variable(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                                        const microjit::Ref<microjit::AssignInstruction> &p_instruction,
-                                                        const int64_t &p_offset, const int64_t &p_copy_target) {
-    assign_variable_internal(assembler, p_instruction->target_variable->type, p_instruction->ctor,
-                             p_offset, p_copy_target);
-}
+//void microjit::MicroJITCompiler_x86_64::assign_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
+//                                                                 const microjit::Type &p_type, const void *p_operator,
+//                                                                 const int64_t &p_offset, const int64_t &p_copy_target) {
+//    AIN(assembler->mov(rbx, LOAD_VRBP));
+//    AIN(assembler->mov(rcx, rbx));
+//    AIN(assembler->sub(rbx, std::abs(p_offset)));
+//    if (p_copy_target >= 0) {
+//        AIN(assembler->add(rcx, p_copy_target));
+//    } else {
+//        AIN(assembler->sub(rcx, std::abs(p_copy_target)));
+//    }
+//    VAR_COPY(p_type.size, p_type.is_primitive, p_operator);
+//}
 
 void microjit::MicroJITCompiler_x86_64::iterative_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                                   const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
@@ -617,9 +605,8 @@ void microjit::MicroJITCompiler_x86_64::iterative_destructor_call(microjit::Box<
             if (var->type.is_primitive) continue;
             // If variable is yet to be constructed
             if (var->get_scope_offset() > current.iterating) break;
-            auto vstack_offset = p_frame_info->variable_map.at(var);
-            AIN(assembler->mov(rdi, LOAD_VRBP));
-            AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+            auto stack_offset = p_frame_info->variable_map.at(var);
+            AIN(assembler->mov(rdi, asmjit::x86::qword_ptr(rbp, stack_offset)));
             AIN(assembler->call(var->type.destructor));
         }
     }
@@ -633,9 +620,8 @@ void microjit::MicroJITCompiler_x86_64::single_scope_destructor_call(microjit::B
         if (var->type.is_primitive) continue;
         // If variable is yet to be constructed
         if (var->get_scope_offset() > p_current_scope.iterating) break;
-        auto vstack_offset = p_frame_info->variable_map.at(var);
-        AIN(assembler->mov(rdi, LOAD_VRBP));
-        AIN(assembler->sub(rdi, std::abs(vstack_offset)));
+        auto stack_offset = p_frame_info->variable_map.at(var);
+        AIN(assembler->mov(rdi, asmjit::x86::qword_ptr(rbp, stack_offset)));
         AIN(assembler->call(var->type.destructor));
     }
 }
@@ -792,9 +778,8 @@ microjit::MicroJITCompiler_x86_64::assign_binary_atomic_expression(Box<asmjit::x
             case Value::VAL_VARIABLE: {                                                                 \
                 auto as_var = m_operand.c_style_cast<VariableValue>();                                  \
                 auto curr_var = as_var->variable;                                                       \
-                auto curr_vstack_offset = p_frame_report->variable_map.at(curr_var);                    \
-                AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));                                       \
-                AIN(assembler->sub(asmjit::x86::r10, std::abs(curr_vstack_offset)));                    \
+                auto curr_stack_offset = p_frame_report->variable_map.at(curr_var);                     \
+                AIN(assembler->lea(asmjit::x86::r10, asmjit::x86::qword_ptr(rbp, curr_stack_offset)));  \
                 if (is_fp32){                                                                           \
                     AIN(assembler->lea(rax, asmjit::x86::dword_ptr(asmjit::x86::r10)));                 \
                     AIN(assembler->movss(REP_FP(m_float_type), asmjit::x86::dword_ptr(rax)));           \
@@ -834,9 +819,8 @@ microjit::MicroJITCompiler_x86_64::assign_binary_atomic_expression(Box<asmjit::x
         case Value::VAL_VARIABLE: {                                                                     \
             auto as_var = m_operand.c_style_cast<VariableValue>();                                      \
             auto curr_var = as_var->variable;                                                           \
-            auto curr_vstack_offset = p_frame_report->variable_map.at(curr_var);                        \
-            AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));                                           \
-            AIN(assembler->sub(asmjit::x86::r10, std::abs(curr_vstack_offset)));                        \
+            auto curr_stack_offset = p_frame_report->variable_map.at(curr_var);                         \
+                AIN(assembler->lea(asmjit::x86::r10, asmjit::x86::qword_ptr(rbp, curr_stack_offset)));  \
             switch (m_target_type.size) {                                                               \
                 case 1:                                                                                 \
                     AIN(assembler->mov(REP_U8(m_int_type), asmjit::x86::byte_ptr(asmjit::x86::r10)));   \
@@ -1232,9 +1216,8 @@ void microjit::MicroJITCompiler_x86_64::assign_primitive_binary_atomic_expressio
     MOVE_PRIMITIVE_OPERAND(operand_type, is_operand_floating_point, right_operand,
                            PRIMITIVE_EXPRESSION_RIGHT_FP, PRIMITIVE_EXPRESSION_RIGHT_INTEGER);
 
-    auto target_vstack_offset = p_frame_report->variable_map.at(p_target_var);
-    AIN(assembler->mov(PE_BUFFER, LOAD_VRBP));
-    AIN(assembler->sub(PE_BUFFER, std::abs(target_vstack_offset)));
+    auto target_stack_offset = p_frame_report->variable_map.at(p_target_var);
+    AIN(assembler->lea(PE_BUFFER, asmjit::x86::qword_ptr(rbp, target_stack_offset)));
     // Calculate the stuff
     if (AbstractOperation::operation_return_same(operation_type)){
         if (is_operand_floating_point) {

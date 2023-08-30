@@ -17,7 +17,7 @@ microjit::MicroJITCompiler::create_frame_report(const microjit::Ref<microjit::Re
         size_t iterating;
     };
     std::stack<ScopeReport> stack{};
-    stack.push(ScopeReport{p_func->main_scope, 0, 0, 0});
+    stack.push(ScopeReport{p_func->main_scope, sizeof(void*) * 3, 0, 0});
     while (!stack.empty()){
         auto current = stack.top();
         stack.pop();

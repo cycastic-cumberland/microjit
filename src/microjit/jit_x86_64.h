@@ -48,6 +48,21 @@ namespace microjit {
             Ref<BranchInfo> branch_info;
             bool registered_begin;
         };
+        struct RelativeObject {
+            enum BaseUnit : uint32_t {
+                STACK = 1,
+                VIRTUAL_STACK = 2,
+                BASE_PTR = 4,
+//                CEIL_PTR = 8,
+                STACK_BASE_PTR = STACK | BASE_PTR,
+//                STACK_PTR = STACK | CEIL_PTR,
+                VIRTUAL_STACK_BASE_PTR  = VIRTUAL_STACK | BASE_PTR,
+//                VIRTUAL_STACK_PTR = VIRTUAL_STACK | CEIL_PTR
+            };
+
+            BaseUnit unit;
+            int64_t offset;
+        };
 //        const x86_64PrimitiveConverter converter{};
     private:
         static Ref<BranchesReport> create_branches_report(microjit::Box<asmjit::x86::Assembler> &assembler,
@@ -65,17 +80,8 @@ namespace microjit {
         static void copy_construct_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                      const Type& p_type,
                                                      const void* p_copy_constructor,
-                                                     const int64_t& p_offset,
-                                                     const int64_t& p_copy_target);
-        static void assign_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                             const microjit::Type &p_type,
-                                             const void* p_operator,
-                                             const int64_t& p_offset,
-                                             const int64_t& p_copy_target);
-        static void assign_variable(microjit::Box<asmjit::x86::Assembler> &assembler,
-                                    const microjit::Ref<microjit::AssignInstruction> &p_instruction,
-                                    const int64_t& p_offset,
-                                    const int64_t& p_copy_target);
+                                                     RelativeObject p_receive_target,
+                                                     RelativeObject p_copy_target);
         static void iterative_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
                                               const Ref<StackFrameInfo>& p_frame_info,
                                               const std::stack<ScopeInfo>& p_scope_stack);

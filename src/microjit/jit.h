@@ -48,6 +48,8 @@ namespace microjit {
             std::unordered_map<Ref<VariableInstruction>, int64_t, InstructionHasher<VariableInstruction>> variable_map{};
         };
     protected:
+        static constexpr int64_t stack_reserve = sizeof(void*) * 3;
+
         mutable Ref<MicroJITRuntime> runtime;
         virtual CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const { return {}; }
         static Ref<StackFrameInfo> create_frame_report(const Ref<RectifiedFunction>& p_func);
