@@ -88,7 +88,7 @@ namespace microjit {
         static void single_scope_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                  const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
                                                  const microjit::MicroJITCompiler_x86_64::ScopeInfo &p_current_scope);
-        static void trampoline_caller(BaseTrampoline* p_trampoline, VirtualStack* p_stack);
+        static void trampoline_caller(JitFunctionTrampoline* p_trampoline, VirtualStack* p_stack);
         static void copy_construct_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
                                                      const Ref<StackFrameInfo>& p_frame_report,
                                                      const Ref<CopyConstructInstruction> &p_instruction);

@@ -15,10 +15,6 @@
 #endif
 
 namespace microjit {
-    struct VirtualStackSettings {
-        size_t vstack_default_size = 1024 * 1024 * 8;
-        size_t vstack_buffer_size = 128;
-    };
     template<class TCompiler, class TRefCounter = ThreadSafeObject>
     class OrchestratorComponent : public TRefCounter {
     public:
@@ -32,10 +28,10 @@ namespace microjit {
             const OrchestratorComponent* parent;
             const Ref<Function<R, Args...>> function;
             const Ref<JitFunctionTrampoline> trampoline;
+            const Box<VirtualStack> backup_virtual_stack;
             mutable std::function<R(VirtualStack*, Args...)> compiled_function{};
             mutable VirtualStackFunction real_compiled_function{};
-            mutable size_t invocation_count{};
-            const VirtualStackSettings& settings;
+            const CompilationAgentSettings& settings;
         private:
             template<typename R2, typename ...Args2>
             void compile_internal(std::function<R2(VirtualStack*, Args2...)>* p_func) const;
@@ -57,18 +53,15 @@ namespace microjit {
             void recompile() const;
             void detach();
             // Not atomically counted for performance reasons
-            _NO_DISCARD_ _ALWAYS_INLINE_ size_t get_invocation_count() const { return invocation_count;}
             _ALWAYS_INLINE_ std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
                 compile_internal(&compiled_function);
                 return compiled_function;
             }
             _ALWAYS_INLINE_ std::function<R(Args...)> get_compiled_function() const {
                 auto f = get_full_compiled_function();
-                auto size = settings.vstack_default_size;
-                auto buffer = settings.vstack_buffer_size;
-                return [f, size, buffer](Args&&... args) -> R {
-                    auto stack = Box<VirtualStack>::make_box(size, buffer);
-                    return f(stack.ptr(), std::forward<Args>(args)...);
+                auto virtual_stack = const_cast<VirtualStack *>(backup_virtual_stack.ptr());
+                return [f, virtual_stack](Args&&... args) -> R {
+                    return f(virtual_stack, std::forward<Args>(args)...);
                 };
             }
         };
@@ -110,7 +103,7 @@ namespace microjit {
         public:
             explicit InstanceHub(OrchestratorComponent* p_orchestrator) : parent(p_orchestrator) {}
             _NO_DISCARD_ VirtualStackFunction fetch_function(const Ref<RectifiedFunction> &p_func) const;
-            _NO_DISCARD_ const VirtualStackSettings& get_settings() const;
+            _NO_DISCARD_ const CompilationAgentSettings& get_settings() const;
             template<typename R, typename ...Args>
             void detach_instance(const FunctionInstance<R, Args...>* p_instance, const void* p_func) const;
             void register_heat(const Ref<RectifiedFunction>& p_func) const;
@@ -119,14 +112,14 @@ namespace microjit {
         friend struct InstanceHub;
 
         const InstanceHub hub;
-        VirtualStackSettings settings;
+        CompilationAgentSettings agent_settings;
         Ref<TCompiler> compiler{};
         Ref<MicroJITRuntime> runtime{};
         RuntimeAgent<TCompiler> agent;
 
         std::unordered_map<size_t, Ref<TRefCounter>> instance_map{};
     private:
-        const VirtualStackSettings& get_settings() const { return settings; }
+        const CompilationAgentSettings& get_settings() const { return agent_settings; }
         MicroJITCompiler::CompilationResult compile(const Ref<RectifiedFunction>& p_func) {
             return compiler->compile(p_func);
         }
@@ -153,17 +146,15 @@ namespace microjit {
         void register_heat(const Ref<RectifiedFunction>& p_func){
             agent.register_heat(p_func);
         }
-        static constexpr auto agent_settings = CompilationAgentSettings{CompilationAgentHandlerType::MULTI_POOLED,
-                                                                        6, 1.0, 0.1,
-                                                                        50'000.0, 50'000.0,
-                                                                        8};
+        static constexpr auto default_settings = CompilationAgentSettings{CompilationAgentHandlerType::MULTI_POOLED,
+                                                                        6, 1024 * 4, 8};
     public:
         explicit OrchestratorComponent(const CompilationAgentSettings& p_settings)
-            : hub(this), agent(p_settings) {
+            : hub(this), agent(p_settings), agent_settings(p_settings) {
             runtime = Ref<MicroJITRuntime>::make_ref();
             compiler = Ref<TCompiler>::make_ref(runtime);
         }
-        OrchestratorComponent(): OrchestratorComponent(agent_settings) {}
+        OrchestratorComponent(): OrchestratorComponent(default_settings) {}
         template<typename R, typename ...Args>
         _ALWAYS_INLINE_ InstanceWrapper<R, Args...> create_instance() {
             return create_instance_internal<R, Args...>();
@@ -172,7 +163,7 @@ namespace microjit {
         _ALWAYS_INLINE_ InstanceWrapper<R, Args...> create_instance_from_model(const std::function<R(Args...)>&) {
             return create_instance_internal<R, Args...>();
         }
-        // _NO_DISCARD_ VirtualStackSettings& edit_vstack_settings() { return settings; }
+        // _NO_DISCARD_ CompilationAgentSettings& edit_vstack_settings() { return settings; }
     };
 
     template<class CompilerTy, class RefCounter>
@@ -202,12 +193,13 @@ namespace microjit {
             const OrchestratorComponent *p_orchestrator)
             : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()},
               settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()),
-              trampoline(JitFunctionTrampoline::create(this, static_recompile, &real_compiled_function)) {
+              trampoline(JitFunctionTrampoline::create(this, static_recompile, &real_compiled_function)),
+              backup_virtual_stack(Box<VirtualStack>::make_box(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings().virtual_stack_size, 0)) {
         function->get_trampoline() = trampoline;
     }
 
     template<class CompilerTy, class RefCounter>
-    const VirtualStackSettings &OrchestratorComponent<CompilerTy, RefCounter>::InstanceHub::get_settings() const {
+    const CompilationAgentSettings &OrchestratorComponent<CompilerTy, RefCounter>::InstanceHub::get_settings() const {
         return parent->get_settings();
     }
 
@@ -247,20 +239,22 @@ namespace microjit {
     }
     template<typename T>
     static _ALWAYS_INLINE_ void destruct_argument(const T &, VirtualStack *p_stack){
-        static const bool trivially_destructed = std::is_trivially_destructible<T>::value;
+        static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
         auto stack_ptr = p_stack->rsp();
-        if (!trivially_destructed)
-            ((T*)*stack_ptr)->~T();
-        *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) + sizeof(T));
+        auto ptr = *stack_ptr;
+        if constexpr (!trivially_destructible)
+            ((T*)ptr)->~T();
+        *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
     }
 
     template<typename T>
     static _ALWAYS_INLINE_ void destruct_return(VirtualStack *p_stack){
-        static const bool trivially_destructed = std::is_trivially_destructible<T>::value;
+        static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
         auto stack_ptr = p_stack->rsp();
-        if (!trivially_destructed)
-            ((T*)*stack_ptr)->~T();
-        *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) + sizeof(T));
+        auto ptr = *stack_ptr;
+        if constexpr (!trivially_destructible)
+            ((T*)ptr)->~T();
+        *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
     }
 
     template <typename R, typename ...Args>
@@ -274,8 +268,7 @@ namespace microjit {
     void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
             std::function<void(VirtualStack *, Args2...)> *p_func,
             OrchestratorComponent::VirtualStackFunction p_cb) const {
-        auto count = &invocation_count;
-        *p_func = [p_cb, count](VirtualStack* p_stack, Args2&& ...args) -> void {
+        *p_func = [p_cb](VirtualStack* p_stack, Args2&& ...args) -> void {
             auto old_rbp = *p_stack->rbp();
             auto old_rsp = *p_stack->rsp();
             (move_argument<Args2>(args, p_stack), ...);
@@ -288,7 +281,6 @@ namespace microjit {
             }
             *p_stack->rbp() = old_rbp;
             *p_stack->rsp() = old_rsp;
-            *count += 1;
         };
         real_compiled_function = p_cb;
     }
@@ -299,8 +291,7 @@ namespace microjit {
     void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
             std::function<R2(VirtualStack *, Args2...)> *p_func,
             OrchestratorComponent::VirtualStackFunction p_cb) const {
-        auto count = &invocation_count;
-        std::function<R2(VirtualStack*, Args2...)> new_func = [p_cb, count](VirtualStack* p_stack, Args2&& ...args) -> R2 {
+        std::function<R2(VirtualStack*, Args2...)> new_func = [p_cb](VirtualStack* p_stack, Args2&& ...args) -> R2 {
             auto old_rbp = *p_stack->rbp();
             auto old_rsp = *p_stack->rsp();
             (move_argument<Args2>(args, p_stack), ...);
@@ -316,7 +307,6 @@ namespace microjit {
             }
             *p_stack->rbp() = old_rbp;
             *p_stack->rsp() = old_rsp;
-            *count += 1;
             return re;
         };
         p_func->swap(new_func);

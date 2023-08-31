@@ -696,13 +696,11 @@ void microjit::MicroJITCompiler_x86_64::copy_immediate_internal(microjit::Box<as
     AIN(assembler->add(asmjit::x86::rsp, type_data.size));
 }
 
-void microjit::MicroJITCompiler_x86_64::trampoline_caller(BaseTrampoline* p_trampoline,
+void microjit::MicroJITCompiler_x86_64::trampoline_caller(JitFunctionTrampoline* p_trampoline,
                                                           microjit::VirtualStack *p_stack) {
-    auto as_jit_tramp = (microjit::JitFunctionTrampoline*)p_trampoline;
     auto cb = &microjit::JitFunctionTrampoline::call_final;
-    (as_jit_tramp->*cb)(p_stack);
+    (p_trampoline->*cb)(p_stack);
 }
-
 void microjit::MicroJITCompiler_x86_64::assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
                                                                  const Ref<StackFrameInfo>& p_frame_report,
                                                                  const Ref<AssignInstruction> &p_instruction) {

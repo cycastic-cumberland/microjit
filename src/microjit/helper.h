@@ -101,6 +101,13 @@ namespace microjit {
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_valid() const { return reference != nullptr; }
         _NO_DISCARD_ _ALWAYS_INLINE_ bool is_null() const { return reference == nullptr; }
 
+        _ALWAYS_INLINE_ bool operator==(std::nullptr_t) const {
+            return is_null();
+        }
+        _ALWAYS_INLINE_ bool operator!=(std::nullptr_t) const {
+            return is_valid();
+        }
+
         constexpr Ref() = default;
         Ref(std::nullptr_t) : Ref() {}
 

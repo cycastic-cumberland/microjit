@@ -28,10 +28,7 @@ namespace microjit
     struct CompilationAgentSettings {
         CompilationAgentHandlerType type;
         size_t cache_capacity;
-        double decay_per_invocation;
-        double decay_rate;
-        double decay_frequency;
-        double cleanup_frequency;
+        size_t virtual_stack_size;
         uint8_t initial_compiler_thread_count;
     };
     class CompilationHandler {
