@@ -5,7 +5,6 @@
 #ifndef MICROJIT_EXPERIMENT_RUNTIME_AGENT_H
 #define MICROJIT_EXPERIMENT_RUNTIME_AGENT_H
 
-#include "decaying_weighted_cache.h"
 #include "instructions.h"
 #include "utils.h"
 #include "thread_pool.h"

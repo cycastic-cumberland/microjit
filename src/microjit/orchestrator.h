@@ -24,24 +24,70 @@ namespace microjit {
         struct FunctionInstance : public TRefCounter {
         private:
             typedef OrchestratorComponent<TCompiler, TRefCounter> Host;
+            class InstanceTrampoline {
+            private:
+                void (**actual_trampoline)(VirtualStack*);
+                void (*recompile_cb)(const void*);
+                const void* host;
+                friend class FunctionInstance;
+
+                InstanceTrampoline(const void* p_host, void (*p_recompile_cb)(const void*),
+                                   void (**p_actual_trampoline)(VirtualStack*))
+                        : host(p_host), recompile_cb(p_recompile_cb),
+                          actual_trampoline(p_actual_trampoline){}
+
+                template<typename T>
+                static _ALWAYS_INLINE_ void move_argument(const T &p_arg, VirtualStack *p_stack){
+                    static constexpr bool trivially_copy_constructable = std::is_trivially_copy_constructible_v<T>;
+                    auto stack_ptr = p_stack->rsp();
+                    *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) - sizeof(T));
+                    if constexpr (trivially_copy_constructable){
+                        *(T*)(*stack_ptr) = p_arg;
+                    } else
+                        new (*stack_ptr) T(p_arg);
+                }
+                template<typename T>
+                static _ALWAYS_INLINE_ void destruct_argument(const T &, VirtualStack *p_stack){
+                    static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
+                    auto stack_ptr = p_stack->rsp();
+                    auto ptr = *stack_ptr;
+                    if constexpr (!trivially_destructible)
+                        ((T*)ptr)->~T();
+                    *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
+                }
+
+                template<typename T>
+                static _ALWAYS_INLINE_ void destruct_return(VirtualStack *p_stack){
+                    static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
+                    auto stack_ptr = p_stack->rsp();
+                    auto ptr = *stack_ptr;
+                    if constexpr (!trivially_destructible)
+                        ((T*)ptr)->~T();
+                    *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
+                }
+
+                template<typename ...Args2>
+                static void call_internal(void (*)(Args2...), const InstanceTrampoline* p_self, VirtualStack* p_stack, Args2&&... args);
+                template<typename R2, typename ...Args2>
+                static R2 call_internal(R2 (*)(Args2...), const InstanceTrampoline* p_self, VirtualStack* p_stack, Args2&&... args);
+            public:
+                R call_final(VirtualStack* p_stack, Args&&... args) const {
+                    static constexpr R (*f)(Args...) = nullptr;
+                    return call_internal(f, this, p_stack, std::forward<Args>(args)...);
+                }
+            };
+            
         private:
             const OrchestratorComponent* parent;
             const Ref<Function<R, Args...>> function;
-            const Ref<JitFunctionTrampoline> trampoline;
             const Box<VirtualStack> backup_virtual_stack;
-            mutable std::function<R(VirtualStack*, Args...)> compiled_function{};
+            const Ref<JitFunctionTrampoline> jit_trampoline;
+            const InstanceTrampoline instance_trampoline;
             mutable VirtualStackFunction real_compiled_function{};
-            const CompilationAgentSettings& settings;
         private:
-            template<typename R2, typename ...Args2>
-            void compile_internal(std::function<R2(VirtualStack*, Args2...)>* p_func) const;
-            template<typename ...Args2>
-            void compile_internal(std::function<void(VirtualStack*, Args2...)>* p_func) const;
-            template<typename R2, typename ...Args2>
-            void compile_internal(std::function<R2(VirtualStack*, Args2...)>* p_func, VirtualStackFunction p_cb) const;
-            template<typename ...Args2>
-            void compile_internal(std::function<void(VirtualStack*, Args2...)>* p_func, VirtualStackFunction p_cb) const;
+            void compile_internal() const;
 
+            _NO_DISCARD_ _ALWAYS_INLINE_ bool is_compiled() const { return real_compiled_function != nullptr; }
             static void static_recompile(const FunctionInstance* p_self);
         public:
             explicit FunctionInstance(const OrchestratorComponent* p_orchestrator);
@@ -49,19 +95,11 @@ namespace microjit {
 
             Ref<Function<R, Args...>> get_function() const { return function; }
             R call(Args... args) const;
-            R call_with_vstack(VirtualStack* p_stack, Args... args) const;
             void recompile() const;
             void detach();
-            // Not atomically counted for performance reasons
-            _ALWAYS_INLINE_ std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
-                compile_internal(&compiled_function);
-                return compiled_function;
-            }
-            _ALWAYS_INLINE_ std::function<R(Args...)> get_compiled_function() const {
-                auto f = get_full_compiled_function();
-                auto virtual_stack = const_cast<VirtualStack *>(backup_virtual_stack.ptr());
-                return [f, virtual_stack](Args&&... args) -> R {
-                    return f(virtual_stack, std::forward<Args>(args)...);
+            _ALWAYS_INLINE_ std::function<R(Args...)> get_compiled_function_compat() const {
+                return [this](Args&&... args) -> R {
+                    return instance_trampoline.call_final((VirtualStack*)backup_virtual_stack.ptr(), std::forward<Args>(args)...);
                 };
             }
         };
@@ -80,18 +118,13 @@ namespace microjit {
             void recompile() const { instance->recompile(); }
             void detach() { instance->detach(); }
             Ref<FunctionInstance<R, Args...>> unwrap() const { return instance; }
-            std::function<R(VirtualStack*, Args...)> get_full_compiled_function() const {
-                return instance->get_full_compiled_function();
-            }
+
             std::function<R(Args...)> get_compiled_function() const {
-                return instance->get_compiled_function();
+                return instance->get_compiled_function_compat();
             }
 
             _ALWAYS_INLINE_ R call(Args&&... args) const {
                 return instance->call(std::forward<Args>(args)...);
-            }
-            _ALWAYS_INLINE_ R call_with_vstack(VirtualStack* p_stack, Args&&... args) const {
-                return instance->call_with_vstack(p_stack, std::forward<Args>(args)...);
             }
             _ALWAYS_INLINE_ R operator()(Args... args) const {
                 return call(std::forward<Args>(args)...);
@@ -163,7 +196,6 @@ namespace microjit {
         _ALWAYS_INLINE_ InstanceWrapper<R, Args...> create_instance_from_model(const std::function<R(Args...)>&) {
             return create_instance_internal<R, Args...>();
         }
-        // _NO_DISCARD_ CompilationAgentSettings& edit_vstack_settings() { return settings; }
     };
 
     template<class CompilerTy, class RefCounter>
@@ -192,10 +224,10 @@ namespace microjit {
     OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::FunctionInstance(
             const OrchestratorComponent *p_orchestrator)
             : parent(p_orchestrator), function{Ref<Function<R, Args...>>::make_ref()},
-              settings(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings()),
-              trampoline(JitFunctionTrampoline::create(this, static_recompile, &real_compiled_function)),
+              jit_trampoline(BaseTrampoline::create_jit_trampoline(this, static_recompile, &real_compiled_function)),
+              instance_trampoline(this, (void(*)(const void*))static_recompile, &real_compiled_function),
               backup_virtual_stack(Box<VirtualStack>::make_box(const_cast<OrchestratorComponent*>(p_orchestrator)->get_settings().virtual_stack_size, 0)) {
-        function->get_trampoline() = trampoline;
+        function->get_trampoline() = jit_trampoline;
     }
 
     template<class CompilerTy, class RefCounter>
@@ -206,138 +238,24 @@ namespace microjit {
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
     void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::recompile() const {
-        std::function<R(VirtualStack*, Args...)> dummy{};
-        compiled_function.swap(dummy);
-        compile_internal(&compiled_function);
+        real_compiled_function = nullptr;
+        compile_internal();
     }
 
     template<class TCompiler, class TRefCounter>
     template<typename R, typename... Args>
     void OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...>::static_recompile(
             const OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...> *p_self) {
-        p_self->compile_internal(&p_self->compiled_function);
-    }
-
-    template<class CompilerTy, class RefCounter>
-    template<typename R, typename... Args>
-    R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call_with_vstack(VirtualStack *p_stack,
-                                                                                        Args... args) const {
-        return (get_full_compiled_function())(p_stack, std::forward<Args>(args)...);
+        p_self->compile_internal();
     }
 
     template<class CompilerTy, class RefCounter>
     template<typename R, typename... Args>
     R OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::call(Args... args) const {
-        return (get_compiled_function())(std::forward<Args>(args)...);
+        // return (get_compiled_function_compat())(std::forward<Args>(args)...);
+        return instance_trampoline.call_final((VirtualStack*)backup_virtual_stack.ptr(), std::forward<Args>(args)...);
     }
 
-    template<typename T>
-    static _ALWAYS_INLINE_ void move_argument(const T &p_arg, VirtualStack *p_stack){
-        auto stack_ptr = p_stack->rsp();
-        *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) - sizeof(T));
-        new (*stack_ptr) T(p_arg);
-    }
-    template<typename T>
-    static _ALWAYS_INLINE_ void destruct_argument(const T &, VirtualStack *p_stack){
-        static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
-        auto stack_ptr = p_stack->rsp();
-        auto ptr = *stack_ptr;
-        if constexpr (!trivially_destructible)
-            ((T*)ptr)->~T();
-        *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
-    }
-
-    template<typename T>
-    static _ALWAYS_INLINE_ void destruct_return(VirtualStack *p_stack){
-        static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
-        auto stack_ptr = p_stack->rsp();
-        auto ptr = *stack_ptr;
-        if constexpr (!trivially_destructible)
-            ((T*)ptr)->~T();
-        *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
-    }
-
-    template <typename R, typename ...Args>
-    static void swap_lambdas(std::function<R(Args...)>* p_to, std::function<R(Args...)>* p_from){
-        p_to->swap(*p_from);
-    }
-
-    template<class CompilerTy, class RefCounter>
-    template<typename R, typename... Args>
-    template<typename... Args2>
-    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
-            std::function<void(VirtualStack *, Args2...)> *p_func,
-            OrchestratorComponent::VirtualStackFunction p_cb) const {
-        *p_func = [p_cb](VirtualStack* p_stack, Args2&& ...args) -> void {
-            auto old_rbp = *p_stack->rbp();
-            auto old_rsp = *p_stack->rsp();
-            (move_argument<Args2>(args, p_stack), ...);
-            auto args_end = *p_stack->rsp();
-            *p_stack->rbp() = *p_stack->rsp();
-            p_cb(p_stack);
-            if (sizeof...(Args)){
-                *p_stack->rsp() = args_end;
-                (destruct_argument<Args2>(args, p_stack), ...);
-            }
-            *p_stack->rbp() = old_rbp;
-            *p_stack->rsp() = old_rsp;
-        };
-        real_compiled_function = p_cb;
-    }
-
-    template<class CompilerTy, class RefCounter>
-    template<typename R, typename... Args>
-    template<typename R2, typename... Args2>
-    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
-            std::function<R2(VirtualStack *, Args2...)> *p_func,
-            OrchestratorComponent::VirtualStackFunction p_cb) const {
-        std::function<R2(VirtualStack*, Args2...)> new_func = [p_cb](VirtualStack* p_stack, Args2&& ...args) -> R2 {
-            auto old_rbp = *p_stack->rbp();
-            auto old_rsp = *p_stack->rsp();
-            (move_argument<Args2>(args, p_stack), ...);
-            const auto return_slot = (VirtualStack::StackPtr)((size_t)*p_stack->rsp() - sizeof(R2));
-            (*p_stack->rbp()) = return_slot;
-            (*p_stack->rsp()) = return_slot;
-            p_cb(p_stack);
-            auto re = *(R2*)return_slot;
-            // After copying the return value, destroy its stack entry
-            destruct_return<R2>(p_stack);
-            if (sizeof...(Args)){
-                (destruct_argument<Args2>(args, p_stack), ...);
-            }
-            *p_stack->rbp() = old_rbp;
-            *p_stack->rsp() = old_rsp;
-            return re;
-        };
-        p_func->swap(new_func);
-        real_compiled_function = p_cb;
-    }
-
-    template<class CompilerTy, class RefCounter>
-    template<typename R, typename... Args>
-    template<typename R2, typename... Args2>
-    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
-            std::function<R2(VirtualStack *, Args2...)> *p_func) const {
-        static const auto hub_offset = ((size_t)(&(((Host*)0)->hub)));
-
-        if (p_func->operator bool()) return;
-        const auto& instance_hub = *(InstanceHub*)(&((uint8_t *)parent)[hub_offset]);
-        auto cb = instance_hub.fetch_function(function->rectify());
-        compile_internal(p_func, cb);
-    }
-
-    template<class CompilerTy, class RefCounter>
-    template<typename R, typename... Args>
-    template<typename... Args2>
-    void OrchestratorComponent<CompilerTy, RefCounter>::FunctionInstance<R, Args...>::compile_internal(
-            std::function<void(VirtualStack *, Args2...)> *p_func) const {
-        static const auto hub_offset = ((size_t)(&(((Host*)0)->hub)));
-
-        if (p_func->operator bool()) return;
-        const auto& instance_hub = *(InstanceHub*)(&((uint8_t *)parent)[hub_offset]);
-        auto cb = instance_hub.fetch_function(function->rectify());
-        compile_internal(p_func, cb);
-    }
 
     template<class CompilerTy, class RefCounter>
     typename OrchestratorComponent<CompilerTy, RefCounter>::VirtualStackFunction
@@ -345,6 +263,58 @@ namespace microjit {
         return parent->fetch_function(p_func);
     }
 
+    template<class TCompiler, class TRefCounter>
+    template<typename R, typename... Args>
+    template<typename... Args2>
+    void OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...>::InstanceTrampoline::call_internal(
+            void (*)(Args2...), const InstanceTrampoline *p_self, VirtualStack *p_stack, Args2 &&... args) {
+        p_self->recompile_cb(p_self->host);
+        auto old_rbp = *p_stack->rbp();
+        auto old_rsp = *p_stack->rsp();
+        (move_argument<Args2>(args, p_stack), ...);
+        auto args_end = *p_stack->rsp();
+        *p_stack->rbp() = *p_stack->rsp();
+        (*p_self->actual_trampoline)(p_stack);
+        if (sizeof...(Args)){
+            *p_stack->rsp() = args_end;
+            (destruct_argument<Args2>(args, p_stack), ...);
+        }
+        *p_stack->rbp() = old_rbp;
+        *p_stack->rsp() = old_rsp;
+    }
+
+    template<class TCompiler, class TRefCounter>
+    template<typename R, typename... Args>
+    template<typename R2, typename... Args2>
+    R2 OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...>::InstanceTrampoline::call_internal(
+            R2 (*)(Args2...), const InstanceTrampoline *p_self, VirtualStack *p_stack, Args2 &&... args) {
+        p_self->recompile_cb(p_self->host);
+        auto old_rbp = *p_stack->rbp();
+        auto old_rsp = *p_stack->rsp();
+        (move_argument<Args2>(args, p_stack), ...);
+        const auto return_slot = (VirtualStack::StackPtr)((size_t)*p_stack->rsp() - sizeof(R2));
+        (*p_stack->rbp()) = return_slot;
+        (*p_stack->rsp()) = return_slot;
+        (*p_self->actual_trampoline)(p_stack);
+        auto re = *(R2*)return_slot;
+        // After copying the return value, destroy its stack entry
+        destruct_return<R2>(p_stack);
+        if (sizeof...(Args)){
+            (destruct_argument<Args2>(args, p_stack), ...);
+        }
+        *p_stack->rbp() = old_rbp;
+        *p_stack->rsp() = old_rsp;
+        return re;
+    }
+    template<class TCompiler, class TRefCounter>
+    template<typename R, typename... Args>
+    void OrchestratorComponent<TCompiler, TRefCounter>::FunctionInstance<R, Args...>::compile_internal() const {
+        static const auto hub_offset = ((size_t)(&(((Host*)0)->hub)));
+        if (is_compiled()) return;
+        const auto& instance_hub = *(InstanceHub*)(&((uint8_t *)parent)[hub_offset]);
+        auto cb = instance_hub.fetch_function(function->rectify());
+        real_compiled_function = cb;
+    }
 }
 #if defined(__x86_64__) || defined(_M_X64)
     typedef microjit::OrchestratorComponent<microjit::MicroJITCompiler_x86_64, microjit::ThreadSafeObject> x86_64Orchestrator;
