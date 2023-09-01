@@ -63,7 +63,6 @@ namespace microjit {
         }
     };
     template <typename R, typename...Args> class NativeFunctionTrampoline;
-    template<typename R, typename ...Args> class InstanceTrampoline;
     class JitFunctionTrampoline;
 
     class BaseTrampoline : public ThreadUnsafeObject {
@@ -79,9 +78,6 @@ namespace microjit {
         template<class T>
         static Ref<JitFunctionTrampoline> create_jit_trampoline(const T* p_host, void (*p_recompile_cb)(const T*),
                                                  void (**p_actual_trampoline)(VirtualStack*));
-        template<class T, typename R, typename ...Args>
-        static Ref<InstanceTrampoline<R, Args...>> create_orchestrator_instance_trampoline(const T* p_host, void (*p_recompile_cb)(const T*),
-                                                                                           void (**p_actual_trampoline)(VirtualStack*));
     };
 
     template <typename R, typename...Args>
@@ -90,17 +86,77 @@ namespace microjit {
         typedef R (*FunctorType)(Args...);
     private:
         FunctorType functor;
+        friend class BaseTrampoline;
     public:
+        static constexpr auto args_combined_size = (sizeof(Args) + ...);
         const Type return_type;
         const std::vector<Type> argument_types;
+        NativeFunctionTrampoline(FunctorType f, Type p_ret_type, std::vector<Type>& p_arg_types)
+                : functor(f), return_type(p_ret_type), argument_types(std::move(p_arg_types)) {}
     private:
         template<typename T>
         static void create_args(std::vector<Type>* p_vec){
             p_vec->push_back(Type::create<T>());
         }
-        NativeFunctionTrampoline(FunctorType f, Type p_ret_type, std::vector<Type>& p_arg_types)
-            : functor(f), return_type(p_ret_type), argument_types(std::move(p_arg_types)) {}
-        friend class BaseTrampoline;
+#if defined(__clang__)
+        template<typename T>
+        T pass_arg(VirtualStack* p_stack, VirtualStack::StackPtr *vrsp_ptr, int *argc,
+                   VirtualStack::StackPtr old_rsp) const {
+            *vrsp_ptr = (VirtualStack::StackPtr)((size_t)*vrsp_ptr - sizeof(T));
+            auto arg_ptr = (T*)(*vrsp_ptr);
+            if (*argc == argument_types.size() - 1){
+                *vrsp_ptr = old_rsp;
+            } else {
+                *argc += 1;
+            }
+            return *arg_ptr;
+        }
+        template<typename ...Args2>
+        void call_internal(void (*f)(Args2...), VirtualStack* p_stack) const {
+            auto** vrsp_ptr = p_stack->rsp();
+            auto** vrbp_ptr = p_stack->rbp();
+            auto old_rsp = *vrsp_ptr;
+            auto old_rbp = *vrbp_ptr;
+
+            *vrbp_ptr = old_rsp;
+            if constexpr (sizeof...(Args2) == 0) {
+                f();
+            } else {
+                int i = 0;
+                *vrsp_ptr = (VirtualStack::StackPtr)((size_t)old_rsp + args_combined_size);
+                f(pass_arg<Args2>(p_stack, vrsp_ptr, &i, old_rsp)...);
+            }
+
+            *vrsp_ptr = old_rsp;
+            *vrbp_ptr = old_rbp;
+        }
+
+        template<typename R2, typename ...Args2>
+        void call_internal(R2 (*f)(Args2...), VirtualStack* p_stack) const {
+            auto** vrsp_ptr = p_stack->rsp();
+            auto** vrbp_ptr = p_stack->rbp();
+            auto old_rsp = *vrsp_ptr;
+            auto old_rbp = *vrbp_ptr;
+
+            *vrbp_ptr = old_rsp;
+            if constexpr (sizeof...(Args2) == 0) {
+                f();
+            } else {
+                int i = 0;
+                *vrsp_ptr = (VirtualStack::StackPtr)((size_t)old_rsp + args_combined_size);
+                R2 re = f(pass_arg<Args2>(p_stack, vrsp_ptr, &i, old_rsp)...);
+                if constexpr (std::is_fundamental_v<R2>) {
+                    *(R2*)old_rsp = re;
+                } else {
+                    auto cc = (void(*)(void*, const void*))return_type.copy_constructor;
+                    cc(old_rsp, &re);
+                }
+            }
+
+            *vrsp_ptr = old_rsp;
+            *vrbp_ptr = old_rbp;
+        }
+#else
         template<typename T>
         T pass_arg(VirtualStack* p_stack, VirtualStack::StackPtr *vrsp_ptr, int *argc,
                    VirtualStack::StackPtr old_rsp) const {
@@ -109,21 +165,20 @@ namespace microjit {
                 *vrsp_ptr = old_rsp;
             } else {
                 *vrsp_ptr = (VirtualStack::StackPtr)((size_t)*vrsp_ptr + sizeof(T));
+                *argc += 1;
             }
-            *argc += 1;
             return *arg_ptr;
         }
-
         template<typename ...Args2>
-        void call_internal(void (*f)(Args...), VirtualStack* p_stack) const {
+        void call_internal(void (*f)(Args2...), VirtualStack* p_stack) const {
             auto** vrsp_ptr = p_stack->rsp();
             auto** vrbp_ptr = p_stack->rbp();
             auto old_rsp = *vrsp_ptr;
             auto old_rbp = *vrbp_ptr;
 
             *vrbp_ptr = old_rsp;
-            if (argument_types.empty()) {
-                f(pass_arg<Args>(p_stack, nullptr, 0, nullptr)...);
+            if constexpr (sizeof...(Args2) == 0) {
+                f();
             } else {
                 int i = 0;
                 f(pass_arg<Args>(p_stack, vrsp_ptr, &i, old_rsp)...);
@@ -134,7 +189,7 @@ namespace microjit {
         }
 
         template<typename R2, typename ...Args2>
-        void call_internal(R2 (*f)(Args...), VirtualStack* p_stack) const {
+        void call_internal(R2 (*f)(Args2...), VirtualStack* p_stack) const {
             auto** vrsp_ptr = p_stack->rsp();
             auto** vrbp_ptr = p_stack->rbp();
             auto old_rsp = *vrsp_ptr;
@@ -145,15 +200,19 @@ namespace microjit {
                 f(pass_arg<Args>(p_stack, nullptr, 0, nullptr)...);
             } else {
                 int i = 0;
-                *vrsp_ptr = (VirtualStack::StackPtr)(size_t)(old_rsp + return_type.size);
                 R2 re = f(pass_arg<Args>(p_stack, vrsp_ptr, &i, old_rsp)...);
-                auto cc = (void(*)(void*, const void*))return_type.copy_constructor;
-                cc(old_rsp, &re);
+                if constexpr (std::is_fundamental_v<R2>) {
+                    *(R2*)old_rsp = re;
+                } else {
+                    auto cc = (void(*)(void*, const void*))return_type.copy_constructor;
+                    cc(old_rsp, &re);
+                }
             }
 
             *vrsp_ptr = old_rsp;
             *vrbp_ptr = old_rbp;
         }
+#endif
     public:
         _NO_DISCARD_ _ALWAYS_INLINE_ FunctorType get_functor() const {
             return functor;

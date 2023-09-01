@@ -7,7 +7,7 @@ with efficient runtime code generation.
 ## Requirement
 
 MicroJIT makes extensive use of variadic template and attributes, which require C++ 17 or above.
-It has been tested with clang 15.0.7.
+It has been tested with clang 15.0.7 and gcc 13.2.1.
 
 ## Getting Started
 
@@ -103,7 +103,7 @@ All instructions are issued through `Scope<R, Args...>`. All variables can only 
 - [x] Branches (if/else/while)
 - [x] JIT compiled function call
 - [x] Compile-and-go for JIT compiled function call
-- [ ] Native function call
+- [x] Native function call
 - [ ] Documentation
 
 ### Advanced features
@@ -122,9 +122,11 @@ This library has been tested on the following target(s):
 |        | gcc (Linux) | clang (Linux) | MSVC (Windows) | MinGW (Windows) |
 |--------|:-----------:|:-------------:|:--------------:|-----------------|
 | x86    |             |               |                |                 |
-| x86_64 |  &#10004;   |   &#10004;    |       *        |                 |
+| x86_64 |  &#10004;   |   &#10004;    |                |                 |
 
-*: The example worked on Windows using MSVC, but I've yet to run the whole test suite
+**MicroJIT currently does not work with clang and gcc when built with -O1 and -O2 flag,
+so it is highly advisable that you built it with -O0 flag as a library and link it to your project.
+If you decided to embed MicroJIT instead, make sure your project use the -O0 flag.**
 
 ## License
 

@@ -6,9 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 add_definitions(-DDEBUG_ENABLED)
 add_definitions(-DASMJIT_STATIC)
 
-# Enable this to make JIT compiled functions run stack overflow test every time it's ran
-#add_definitions(-DRUN_STACK_OVERFLOW_CHECK)
-
 # Enable this to see the assembler log (Only use this for debugging, as it will log almost everything assembly related)
 #add_definitions(-DVERBOSE_ASSEMBLER_LOG)
 

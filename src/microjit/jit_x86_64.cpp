@@ -287,142 +287,10 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
 //                    converter_cb(assembler, LOAD_VRBP_LOC, from_offset, to_offset);
 //                    break;
                 }
-                case Instruction::IT_INVOKE_JIT: {
-                    auto as_invocation = current_instruction.c_style_cast<InvokeJitInstruction>();
-                    AINL("Invoking JIT function");
-                    const auto target_trampoline = as_invocation->target_trampoline;
-                    const auto target_return_type = as_invocation->target_return_type;
-                    AINL("Invoking JIT function " << std::to_string((size_t)as_invocation->target_function));
-                    // Call's prologue
-                    // r11 now hold old vrbp
-                    AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
-                    AIN(assembler->mov(rdi, VSTACK_LOC));
-                    AIN(assembler->mov(rsi, target_return_type.size + as_invocation->arguments_total_size));
-                    AIN(assembler->call(virtual_stack_create_stack_frame));
-                    // Cache the new stack pointers
-                    AIN(assembler->mov(rdi, VSTACK_LOC));
-                    VSTACK_SETUP()
-                    // r10 now hold new vrbp
-                    AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
-                    for (const auto& arg : as_invocation->passed_arguments->values){
-                        switch (arg->get_value_type()) {
-                            case Value::VAL_IMMEDIATE: {
-                                auto as_imm = arg.c_style_cast<ImmediateValue>();
-                                AIN(assembler->sub(asmjit::x86::r10, as_imm->imm_type.size));
-                                AIN(assembler->mov(rdi, asmjit::x86::r10));
-                                if (as_imm->imm_type.is_primitive)
-                                    copy_immediate_primitive_internal(assembler, as_imm);
-                                else copy_immediate_internal(assembler, as_imm, as_imm->imm_type.copy_constructor);
-                                break;
-                            }
-                            case Value::VAL_ARGUMENT: {
-                                auto as_arg = arg.c_style_cast<ArgumentValue>();
-                                auto idx = as_arg->argument_index;
-                                const auto type = function_arguments->argument_types()[idx];
-                                auto arg_size = type.size;
-                                auto arg_offset = function_arguments->argument_offsets()[idx];
-                                arg_offset += p_func->return_type.size;
-                                AIN(assembler->sub(asmjit::x86::r10, arg_size));
-                                AIN(assembler->mov(rbx, asmjit::x86::r10));
-                                // Load argument from Virtual stack
-                                AIN(assembler->mov(rcx, asmjit::x86::r11));
-                                AIN(assembler->add(rcx, arg_offset));
-                                VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
-                                break;
-                            }
-                            case Value::VAL_VARIABLE: {
-                                auto as_var = arg.c_style_cast<VariableValue>();
-                                auto stack_offset = frame_report->variable_map.at(as_var->variable);
-                                const auto type = as_var->variable->type;
-                                AIN(assembler->sub(asmjit::x86::r10, type.size));
-                                AIN(assembler->mov(rbx, asmjit::x86::r10));
-                                AIN(assembler->lea(rcx, asmjit::x86::qword_ptr(rbp, stack_offset)));
-                                VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
-                                break;
-                            }
-                            case Value::VAL_EXPRESSION:
-                                MJ_RAISE("Passing expression as argument is not supported. Evaluate them first.");
-                        }
-                    }
-                    AIN(assembler->sub(asmjit::x86::r10, target_return_type.size));
-                    // The stack setup process is finished
-                    // Load trampoline to rdi
-                    AIN(assembler->mov(rdi, (size_t)(target_trampoline.ptr())));
-                    // Load VirtualStack to rsi
-                    AIN(assembler->mov(rsi, VSTACK_LOC));
-                    // Call the trampoline
-                    // Note: I have to create a new stack frame again,
-                    // or it would not work with clang
-                    // I'm not going to add a macro here,
-                    // creating a new frame does not hurt the performance that much anyway
-                    AIN(assembler->push(rbp));
-                    AIN(assembler->mov(rbp, rsp));
-                    AIN(assembler->call(trampoline_caller));
-                    // Collapse the stack frame
-                    AIN(assembler->leave());
-                    // Call's epilogue
-                    // Cleanup the arguments
-                    //
-                    // r10 now hold new vrbp
-                    AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
-                    AIN(assembler->mov(rdi, VSTACK_LOC));
-                    AIN(assembler->call(virtual_stack_leave_stack_frame));
-                    // Cache the collapsed stack pointers
-                    AIN(assembler->mov(rdi, VSTACK_LOC));
-                    VSTACK_SETUP()
-                    // r11 now hold original vrbp
-                    AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
-                    for (const auto& arg : as_invocation->passed_arguments->values) {
-                        Box<Type> type{};
-                        switch (arg->get_value_type()) {
-                            case Value::VAL_IMMEDIATE: {
-                                auto as_imm = arg.c_style_cast<ImmediateValue>();
-                                type = Box<Type>::make_box(as_imm->imm_type);
-                                break;
-                            }
-                            case Value::VAL_ARGUMENT: {
-                                auto as_arg = arg.c_style_cast<ArgumentValue>();
-                                auto idx = as_arg->argument_index;
-                                type = Box<Type>::make_box(function_arguments->argument_types()[idx]);
-                                break;
-                            }
-                            case Value::VAL_VARIABLE: {
-                                auto as_var = arg.c_style_cast<VariableValue>();
-                                type = Box<Type>::make_box(as_var->variable->type);
-                                break;
-                            }
-                            case Value::VAL_EXPRESSION:
-                                MJ_RAISE("I didn't think it was possible to reach this...");
-                        }
-                        AIN(assembler->sub(asmjit::x86::r10, type->size));
-                        if (!type->is_primitive){
-                            AIN(assembler->mov(rdi, asmjit::x86::r10));
-                            AIN(assembler->call(type->destructor));
-                        }
-                    }
-                    // The function collapse the stack frame before copying the return value
-                    // There's no stack push in-between so there should be no problem
-                    // If there is... you know where to look
-                    const auto func_ret_type = target_return_type;
-                    if (func_ret_type.size > 0) {
-                        AIN(assembler->sub(asmjit::x86::r10, func_ret_type.size));
-                        // Copy the return value (if needed)
-                        auto return_var = as_invocation->return_variable;
-                        if (return_var.is_valid()){
-                            auto ret_var_offset = frame_report->variable_map.at(return_var);
-                            // Load variable address to rbx
-                            AIN(assembler->lea(rbx, asmjit::x86::qword_ptr(rbp, ret_var_offset)));
-                            AIN(assembler->mov(rcx, asmjit::x86::r10));
-                            // Copy return value into variable
-                            auto type = return_var->type;
-                            VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
-                        }
-                        if (!func_ret_type.is_primitive) {
-                            // Cleanup the return value (if there's any)
-                            AIN(assembler->mov(rdi, asmjit::x86::r10));
-                            AIN(assembler->call(func_ret_type.destructor));
-                        }
-                    }
+                case Instruction::IT_INVOKE: {
+                    auto as_invocation = current_instruction.c_style_cast<InvocationInstruction>();
+                    AINL("Invoking function");
+                    invoke_function(assembler, frame_report, p_func, as_invocation);
                     break;
                 }
                 case Instruction::IT_BRANCH: {
@@ -485,8 +353,6 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     AIN(assembler->jmp(top_most_loop->loop_end_of_scope));
                     break;
                 }
-                case Instruction::IT_INVOKE_NATIVE:
-                    MJ_RAISE("Not yet supported");
                 case Instruction::IT_NONE:
                 case Instruction::IT_DECLARE_VARIABLE:
                     break;
@@ -692,11 +558,17 @@ void microjit::MicroJITCompiler_x86_64::copy_immediate_internal(microjit::Box<as
     AIN(assembler->add(asmjit::x86::rsp, type_data.size));
 }
 
-void microjit::MicroJITCompiler_x86_64::trampoline_caller(JitFunctionTrampoline* p_trampoline,
-                                                          microjit::VirtualStack *p_stack) {
+void microjit::MicroJITCompiler_x86_64::jit_trampoline_caller(JitFunctionTrampoline* p_trampoline,
+                                                              VirtualStack *p_stack) {
     auto cb = &microjit::JitFunctionTrampoline::call_final;
     (p_trampoline->*cb)(p_stack);
 }
+
+void microjit::MicroJITCompiler_x86_64::native_trampoline_caller(microjit::BaseTrampoline *p_trampoline,
+                                                                 microjit::VirtualStack *p_stack) {
+    p_trampoline->call(p_stack);
+}
+
 void microjit::MicroJITCompiler_x86_64::assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
                                                                  const Ref<StackFrameInfo>& p_frame_report,
                                                                  const Ref<AssignInstruction> &p_instruction) {
@@ -1312,5 +1184,148 @@ void microjit::MicroJITCompiler_x86_64::branch_eval_primitive_binary_atomic_expr
     } else
         MJ_RAISE("Unsupported operation");
 }
+
+void microjit::MicroJITCompiler_x86_64::invoke_function(microjit::Box<asmjit::x86::Assembler> &assembler,
+                                                        const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_report,
+                                                        const Ref<RectifiedFunction>& p_func,
+                                                        const microjit::Ref<microjit::InvocationInstruction> &p_instruction) {
+    const auto target_trampoline = p_instruction->target_trampoline;
+    const auto target_return_type = p_instruction->target_return_type;
+    auto function_arguments = p_func->arguments;
+    // Call's prologue
+    // r11 now hold old vrbp
+    AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
+    AIN(assembler->mov(rdi, VSTACK_LOC));
+    AIN(assembler->mov(rsi, target_return_type.size + p_instruction->arguments_total_size));
+    AIN(assembler->call(virtual_stack_create_stack_frame));
+    // Cache the new stack pointers
+    AIN(assembler->mov(rdi, VSTACK_LOC));
+    VSTACK_SETUP()
+    // r10 now hold new vrbp
+    AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
+    for (const auto& arg : p_instruction->passed_arguments->values){
+        switch (arg->get_value_type()) {
+            case Value::VAL_IMMEDIATE: {
+                auto as_imm = arg.c_style_cast<ImmediateValue>();
+                AIN(assembler->sub(asmjit::x86::r10, as_imm->imm_type.size));
+                AIN(assembler->mov(rdi, asmjit::x86::r10));
+                if (as_imm->imm_type.is_primitive)
+                    copy_immediate_primitive_internal(assembler, as_imm);
+                else copy_immediate_internal(assembler, as_imm, as_imm->imm_type.copy_constructor);
+                break;
+            }
+            case Value::VAL_ARGUMENT: {
+                auto as_arg = arg.c_style_cast<ArgumentValue>();
+                auto idx = as_arg->argument_index;
+                const auto type = function_arguments->argument_types()[idx];
+                auto arg_size = type.size;
+                auto arg_offset = function_arguments->argument_offsets()[idx];
+                arg_offset += p_func->return_type.size;
+                AIN(assembler->sub(asmjit::x86::r10, arg_size));
+                AIN(assembler->mov(rbx, asmjit::x86::r10));
+                // Load argument from Virtual stack
+                AIN(assembler->mov(rcx, asmjit::x86::r11));
+                AIN(assembler->add(rcx, arg_offset));
+                VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
+                break;
+            }
+            case Value::VAL_VARIABLE: {
+                auto as_var = arg.c_style_cast<VariableValue>();
+                auto stack_offset = p_frame_report->variable_map.at(as_var->variable);
+                const auto type = as_var->variable->type;
+                AIN(assembler->sub(asmjit::x86::r10, type.size));
+                AIN(assembler->mov(rbx, asmjit::x86::r10));
+                AIN(assembler->lea(rcx, asmjit::x86::qword_ptr(rbp, stack_offset)));
+                VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
+                break;
+            }
+            case Value::VAL_EXPRESSION:
+                MJ_RAISE("Passing expression as argument is not supported. Evaluate them first.");
+        }
+    }
+    AIN(assembler->sub(asmjit::x86::r10, target_return_type.size));
+    // The stack setup process is finished
+    // Load trampoline to rdi
+    AIN(assembler->mov(rdi, (size_t)(target_trampoline.ptr())));
+    // Load VirtualStack to rsi
+    AIN(assembler->mov(rsi, VSTACK_LOC));
+    // Call the trampoline
+    if (p_instruction->is_jit) {
+        // Note: I have to create a new stack frame again,
+        // or it would not work with clang
+        // I'm not going to add a macro here,
+        // creating a new frame does not hurt the performance that much anyway
+        AIN(assembler->push(rbp));
+        AIN(assembler->mov(rbp, rsp));
+        AIN(assembler->call(jit_trampoline_caller));
+        AIN(assembler->leave());
+    } else
+        AIN(assembler->call(native_trampoline_caller));
+    // Collapse the stack frame
+    // Call's epilogue
+    // Cleanup the arguments
+    //
+    // r10 now hold new vrbp
+    AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
+    AIN(assembler->mov(rdi, VSTACK_LOC));
+    AIN(assembler->call(virtual_stack_leave_stack_frame));
+    // Cache the collapsed stack pointers
+    AIN(assembler->mov(rdi, VSTACK_LOC));
+    VSTACK_SETUP()
+    // r11 now hold original vrbp
+    AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
+    for (const auto& arg : p_instruction->passed_arguments->values) {
+        Box<Type> type{};
+        switch (arg->get_value_type()) {
+            case Value::VAL_IMMEDIATE: {
+                auto as_imm = arg.c_style_cast<ImmediateValue>();
+                type = Box<Type>::make_box(as_imm->imm_type);
+                break;
+            }
+            case Value::VAL_ARGUMENT: {
+                auto as_arg = arg.c_style_cast<ArgumentValue>();
+                auto idx = as_arg->argument_index;
+                type = Box<Type>::make_box(function_arguments->argument_types()[idx]);
+                break;
+            }
+            case Value::VAL_VARIABLE: {
+                auto as_var = arg.c_style_cast<VariableValue>();
+                type = Box<Type>::make_box(as_var->variable->type);
+                break;
+            }
+            case Value::VAL_EXPRESSION:
+                MJ_RAISE("I didn't think it was possible to reach this...");
+        }
+        AIN(assembler->sub(asmjit::x86::r10, type->size));
+        if (!type->is_primitive){
+            AIN(assembler->mov(rdi, asmjit::x86::r10));
+            AIN(assembler->call(type->destructor));
+        }
+    }
+    // The function collapse the stack frame before copying the return value
+    // There's no stack push in-between so there should be no problem
+    // If there is... you know where to look
+    const auto func_ret_type = target_return_type;
+    if (func_ret_type.size > 0) {
+        AIN(assembler->sub(asmjit::x86::r10, func_ret_type.size));
+        // Copy the return value (if needed)
+        auto return_var = p_instruction->return_variable;
+        if (return_var.is_valid()){
+            auto ret_var_offset = p_frame_report->variable_map.at(return_var);
+            // Load variable address to rbx
+            AIN(assembler->lea(rbx, asmjit::x86::qword_ptr(rbp, ret_var_offset)));
+            AIN(assembler->mov(rcx, asmjit::x86::r10));
+            // Copy return value into variable
+            auto type = return_var->type;
+            VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
+        }
+        if (!func_ret_type.is_primitive) {
+            // Cleanup the return value (if there's any)
+            AIN(assembler->mov(rdi, asmjit::x86::r10));
+            AIN(assembler->call(func_ret_type.destructor));
+        }
+    }
+}
+
 
 #endif

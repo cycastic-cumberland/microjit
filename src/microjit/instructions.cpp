@@ -42,7 +42,7 @@ void microjit::RectifiedScope::push_instruction(Ref<Instruction> p_ins){
     instructions.push_back(p_ins);
 }
 
-microjit::Ref<microjit::InvokeJitInstruction>
+microjit::Ref<microjit::InvocationInstruction>
 microjit::RectifiedScope::invoke_jit(const microjit::Ref<microjit::RectifiedFunction> &p_func,
                                      const microjit::Ref<microjit::ArgumentsVector> &p_args,
                                      const Ref<VariableInstruction>& p_ret_var) {
@@ -50,7 +50,7 @@ microjit::RectifiedScope::invoke_jit(const microjit::Ref<microjit::RectifiedFunc
     if (p_func->trampoline.is_null()) MJ_RAISE("p_func does not have a trampoline function. "
                                       "invoke_jit can only be called on functions that are created by the Orchestrator.");
     auto args = p_args.is_valid() ? p_args : Ref<ArgumentsVector>::make_ref();
-    auto ins = InvokeJitInstruction::create(arguments, p_func, args, p_ret_var);
+    auto ins = InvocationInstruction::create(arguments, p_func, args, p_ret_var);
     push_instruction(ins.template c_style_cast<Instruction>());
     return ins;
 }
@@ -164,18 +164,19 @@ microjit::Ref<microjit::BreakInstruction> microjit::RectifiedScope::break_loop()
     return ins;
 }
 
-microjit::InvokeJitInstruction::InvokeJitInstruction(const microjit::Ref<microjit::RectifiedFunction> &p_func,
-                                                     const microjit::Ref<microjit::ArgumentsVector> &p_args,
-                                                     const Ref<VariableInstruction>& p_ret_var, const size_t& p_total_size)
-        : Instruction(IT_INVOKE_JIT), passed_arguments(p_args),
+microjit::InvocationInstruction::InvocationInstruction(const Ref<BaseTrampoline>& p_trampoline, Type p_type,
+                                                       const microjit::Ref<microjit::ArgumentsVector> &p_args,
+                                                       const Ref<VariableInstruction>& p_ret_var, size_t p_total_size,
+                                                       bool p_is_jit)
+        : Instruction(IT_INVOKE), passed_arguments(p_args),
           return_variable(p_ret_var), arguments_total_size(p_total_size),
-          target_trampoline(p_func->trampoline), target_return_type(p_func->return_type){}
+          target_trampoline(p_trampoline), target_return_type(p_type), is_jit(p_is_jit){}
 
-microjit::Ref<microjit::InvokeJitInstruction>
-microjit::InvokeJitInstruction::create(const Ref<ArgumentsDeclaration>& p_parent_args,
-                                       const microjit::Ref<microjit::RectifiedFunction> &p_func,
-                                       const microjit::Ref<microjit::ArgumentsVector> &p_args,
-                                       const Ref<VariableInstruction>& p_ret_var){
+microjit::Ref<microjit::InvocationInstruction>
+microjit::InvocationInstruction::create(const Ref<ArgumentsDeclaration>& p_parent_args,
+                                        const microjit::Ref<microjit::RectifiedFunction> &p_func,
+                                        const microjit::Ref<microjit::ArgumentsVector> &p_args,
+                                        const Ref<VariableInstruction>& p_ret_var){
     const auto& func_args = p_func->arguments;
     const auto& func_arg_types = func_args->argument_types();
     const auto& parent_arg_types = p_parent_args->argument_types();
@@ -217,8 +218,9 @@ microjit::InvokeJitInstruction::create(const Ref<ArgumentsDeclaration>& p_parent
         }
     }
 
-    auto ins = new InvokeJitInstruction(p_func, p_args, p_ret_var, total_size);
-    return Ref<InvokeJitInstruction>::from_uninitialized_object(ins);
+    auto ins = new InvocationInstruction(p_func->trampoline.c_style_cast<BaseTrampoline>(), p_func->return_type,
+                                         p_args, p_ret_var, total_size, true);
+    return Ref<InvocationInstruction>::from_uninitialized_object(ins);
 }
 
 microjit::Ref<microjit::PrimitiveBinaryOperation>

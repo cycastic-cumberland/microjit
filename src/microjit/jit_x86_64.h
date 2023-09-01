@@ -88,7 +88,6 @@ namespace microjit {
         static void single_scope_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                  const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
                                                  const microjit::MicroJITCompiler_x86_64::ScopeInfo &p_current_scope);
-        static void trampoline_caller(JitFunctionTrampoline* p_trampoline, VirtualStack* p_stack);
         static void copy_construct_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
                                                      const Ref<StackFrameInfo>& p_frame_report,
                                                      const Ref<CopyConstructInstruction> &p_instruction);
@@ -110,11 +109,17 @@ namespace microjit {
                                                         const Ref<BranchInfo>& p_branch_info,
                                                         const Ref<BinaryOperation> &p_binary);
         static void branch_eval_primitive_binary_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
-                                                                  const Ref<StackFrameInfo>& p_frame_report,
+                                                                   const Ref<StackFrameInfo>& p_frame_report,
                                                                    const Ref<BranchesReport>& p_branches_report,
-                                                                  const Ref<BranchInstruction> &p_instruction,
+                                                                   const Ref<BranchInstruction> &p_instruction,
                                                                    const Ref<BranchInfo>& p_branch_info,
-                                                                  const Ref<PrimitiveBinaryOperation> &p_primitive_binary);
+                                                                   const Ref<PrimitiveBinaryOperation> &p_primitive_binary);
+        static void jit_trampoline_caller(JitFunctionTrampoline* p_trampoline, VirtualStack *p_stack);
+        static void native_trampoline_caller(BaseTrampoline* p_trampoline, VirtualStack *p_stack);
+        static void invoke_function(Box<asmjit::x86::Assembler> &assembler,
+                                    const Ref<StackFrameInfo>& p_frame_report,
+                                    const Ref<RectifiedFunction>& p_func,
+                                    const Ref<InvocationInstruction>& p_instruction);
     protected:
         CompilationResult compile_internal(const Ref<RectifiedFunction>& p_func) const override;
     public:

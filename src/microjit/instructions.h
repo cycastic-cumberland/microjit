@@ -42,8 +42,7 @@ namespace microjit {
             IT_SCOPE_CREATE,
             IT_CONVERT,
             IT_PRIMITIVE_CONVERT,
-            IT_INVOKE_JIT,
-            IT_INVOKE_NATIVE,
+            IT_INVOKE,
             IT_BRANCH,
             IT_BREAK,
         };
@@ -267,7 +266,8 @@ namespace microjit {
 
         template<class T>
         static void add_to_vec(std::vector<Ref<Value>>& p_vec, const Ref<T>& p_val){
-            p_vec.push_back(p_val.template safe_cast<Value>());
+            static_assert(std::is_base_of_v<Value, T>);
+            p_vec.push_back(p_val.template c_style_cast<Value>());
         }
     public:
         template<class ...Args>
@@ -279,21 +279,75 @@ namespace microjit {
             return Ref<ArgumentsVector>::from_uninitialized_object(ins);
         }
     };
-    class InvokeJitInstruction : public Instruction {
+    class InvocationInstruction : public Instruction {
     public:
-        const Ref<JitFunctionTrampoline> target_trampoline;
+        const Ref<BaseTrampoline> target_trampoline;
         const Type target_return_type;
         const Ref<VariableInstruction> return_variable;
         const Ref<ArgumentsVector> passed_arguments;
         const size_t arguments_total_size{};
+        const bool is_jit;
     private:
-        InvokeJitInstruction(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args,
-                             const Ref<VariableInstruction>& p_ret_var, const size_t& p_total_size);
+        InvocationInstruction(const Ref<BaseTrampoline>& p_trampoline, Type p_type,
+                              const Ref<ArgumentsVector>& p_args, const Ref<VariableInstruction>& p_ret_var,
+                              size_t p_total_size, bool p_is_jit);
     public:
-        static Ref<InvokeJitInstruction> create(const Ref<ArgumentsDeclaration>& p_parent_args,
-                                                const Ref<RectifiedFunction>& p_func,
-                                                const Ref<ArgumentsVector>& p_args,
-                                                const Ref<VariableInstruction>& p_ret_var);
+        static Ref<InvocationInstruction> create(const Ref<ArgumentsDeclaration>& p_parent_args,
+                                                 const Ref<RectifiedFunction>& p_func,
+                                                 const Ref<ArgumentsVector>& p_args,
+                                                 const Ref<VariableInstruction>& p_ret_var);
+
+        template<typename R, typename ...Args>
+        static Ref<InvocationInstruction> create(const Ref<ArgumentsDeclaration>& p_parent_args,
+                                                 R (*f)(Args...),
+                                                 const Ref<ArgumentsVector>& p_args,
+                                                 const Ref<VariableInstruction>& p_ret_var){
+            auto trampoline = BaseTrampoline::create_native_trampoline(f);
+            const auto& func_arg_types = trampoline->argument_types;
+            const auto& parent_arg_types = p_parent_args->argument_types();
+            const auto& arg_values = p_args->values;
+            size_t total_size = 0;
+            // There can be no return variable, if you want to discard the return result
+            if (p_ret_var.is_valid())
+                if (p_ret_var->type != trampoline->return_type)
+                    MJ_RAISE("Mismatched return type");
+            if (parent_arg_types.size() != func_arg_types.size() ||
+                func_arg_types.size() != arg_values.size())
+                MJ_RAISE("Mismatched arguments size");
+            for (size_t i = 0, s = func_arg_types.size(); i < s; i++){
+                const auto& target_type = func_arg_types[i];
+                const auto& argument_value = arg_values[i];
+                switch (argument_value->get_value_type()) {
+                    case Value::VAL_IMMEDIATE: {
+                        auto as_imm = argument_value.c_style_cast<ImmediateValue>();
+                        if (as_imm->imm_type != target_type) MJ_RAISE("Mismatched argument type");
+                        total_size += as_imm->imm_type.size;
+                        break;
+                    }
+                    case Value::VAL_ARGUMENT: {
+                        MJ_RAISE("Passing an argument as argument currently does not work properly. "
+                                 "Store it inside a variable first.");
+//                        auto as_arg = argument_value.c_style_cast<ArgumentValue>();
+//                        auto model_type = parent_arg_types[as_arg->argument_index];
+//                        if (model_type != target_type) MJ_RAISE("Mismatched argument type");
+//                        total_size += model_type.size;
+//                        break;
+                    }
+                    case Value::VAL_VARIABLE: {
+                        auto as_var = argument_value.c_style_cast<VariableValue>();
+                        auto var_type = as_var->variable->type;
+                        if (var_type != target_type) MJ_RAISE("Mismatched argument type");
+                        total_size += var_type.size;
+                        break;
+                    }
+                    case Value::VAL_EXPRESSION:
+                        MJ_RAISE("Passing expression as argument is not supported. Evaluate them first.");
+                }
+            }
+            auto ins = new InvocationInstruction(trampoline.template c_style_cast<BaseTrampoline>(), trampoline->return_type,
+                                                 p_args, p_ret_var, total_size, false);
+            return Ref<InvocationInstruction>::from_uninitialized_object(ins);
+        }
     };
 
     class ExpressionValue;
@@ -683,8 +737,17 @@ namespace microjit {
             push_instruction(ins.template c_style_cast<Instruction>());
             return ins;
         }
-        Ref<InvokeJitInstruction> invoke_jit(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args,
-                                             const Ref<VariableInstruction>& p_ret_var);
+        Ref<InvocationInstruction> invoke_jit(const Ref<RectifiedFunction>& p_func, const Ref<ArgumentsVector>& p_args,
+                                              const Ref<VariableInstruction>& p_ret_var);
+        template<typename R, typename ...Args>
+        Ref<InvocationInstruction> invoke_native(R (*f)(Args...),
+                                                 const Ref<ArgumentsVector>& p_args,
+                                                 const Ref<VariableInstruction>& p_ret_var){
+            auto args = p_args.is_valid() ? p_args : Ref<ArgumentsVector>::make_ref();
+            auto ins = InvocationInstruction::create(arguments, f, args, p_ret_var);
+            push_instruction(ins.template c_style_cast<Instruction>());
+            return ins;
+        }
         template<typename R>
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             // Does not own this variable;
@@ -800,9 +863,15 @@ namespace microjit {
         }
 
         template<typename R2, typename ...Args2>
-        Ref<InvokeJitInstruction> invoke_jit(const Ref<Function<R2, Args2...>>& p_func,
-                                             const Ref<ArgumentsVector>& p_args = Ref<ArgumentsVector>::null(),
-                                             const Ref<VariableInstruction>& p_ret_var = Ref<VariableInstruction>::null());
+        Ref<InvocationInstruction> invoke_jit(const Ref<Function<R2, Args2...>>& p_func,
+                                              const Ref<ArgumentsVector>& p_args = Ref<ArgumentsVector>::null(),
+                                              const Ref<VariableInstruction>& p_ret_var = Ref<VariableInstruction>::null());
+        template<typename R2, typename ...Args2>
+        Ref<InvocationInstruction> invoke_native(R2 (*f)(Args2...),
+                                                 const Ref<ArgumentsVector>& p_args = Ref<ArgumentsVector>::null(),
+                                                 const Ref<VariableInstruction>& p_ret_var = Ref<VariableInstruction>::null()){
+            return rectified_scope->invoke_native(f, p_args, p_ret_var);
+        }
         Ref<ReturnInstruction> function_return(const Ref<VariableInstruction>& p_var = Ref<VariableInstruction>::null()){
             return rectified_scope->function_return<R>(p_var);
         }
@@ -896,7 +965,7 @@ namespace microjit {
     }
     template<typename R, typename... Args>
     template<typename R2, typename... Args2>
-    Ref<InvokeJitInstruction>
+    Ref<InvocationInstruction>
     Scope<R, Args...>::invoke_jit(const Ref<Function<R2, Args2...>> &p_func, const Ref<ArgumentsVector> &p_args,
                                   const Ref<VariableInstruction> &p_ret_var) {
         return rectified_scope->invoke_jit(p_func->rectify(), p_args, p_ret_var);
