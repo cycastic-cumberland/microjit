@@ -25,8 +25,7 @@ add_library(microjit
             src/microjit/safe_refcount.h
             src/microjit/def.h
             src/microjit/lock.h
-            src/microjit/virtual_stack.h
-            src/microjit/instructions.h
+        src/microjit/instructions.h
             src/microjit/orchestrator.h
             src/microjit/jit.h
             src/microjit/jit_x86_64.h

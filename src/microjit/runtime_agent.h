@@ -33,13 +33,14 @@ namespace microjit
     class CompilationHandler {
     protected:
         Ref<MicroJITCompiler> compiler;
-        MicroJITCompiler::CompilationResult compile(const Ref<RectifiedFunction>& p_func);
         Ref<MicroJITRuntime> runtime;
         CompilationAgentSettings settings;
         explicit CompilationHandler(const CompilationAgentSettings& p_settings, const Ref<MicroJITCompiler>& p_compiler, const Ref<MicroJITRuntime>& p_runtime)
             : settings(p_settings), compiler(p_compiler), runtime(p_runtime) {}
     public:
-        typedef void(*VirtualStackFunction)(VirtualStack*);
+        void compile(Ref<RectifiedFunction> p_func, microjit::MicroJITCompiler::CompilationResult* p_ret);
+
+        typedef void(*VirtualStackFunction)(uint8_t *);
         virtual ~CompilationHandler() = default;
         virtual bool function_compiled(const Ref<RectifiedFunction> &p_func) const = 0;
         virtual VirtualStackFunction get_or_create(const Ref<RectifiedFunction> &p_func) = 0;
@@ -158,12 +159,6 @@ namespace microjit
         }
         bool remove_function(const void* p_host) {
             return handler->remove_function(p_host);
-        }
-        void register_heat(const void* p_host){
-            // TODO: Fill this in
-        }
-        void register_heat(const Ref<RectifiedFunction>& p_func){
-            register_heat(p_func->host);
         }
     };
 }

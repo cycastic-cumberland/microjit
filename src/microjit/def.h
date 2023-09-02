@@ -46,7 +46,19 @@ void __swap(T& p_left, T& p_right){
 }
 
 #define SWAP(m_a, m_b) __swap((m_a), (m_b))
-
 #endif
+
+static _ALWAYS_INLINE_ constexpr size_t simple_16_bit_align(size_t p_num){
+    return ((p_num + 15) / 16) * 16;
+}
+
+template <typename R, typename...Args>
+static constexpr size_t calculate_args_space() {
+    size_t ret_size = 0;
+    if constexpr (!std::is_void_v<R>) ret_size = sizeof(R);
+    if constexpr (sizeof...(Args))
+        return simple_16_bit_align(ret_size + (sizeof(Args) + ...));
+    else return simple_16_bit_align(ret_size);
+}
 
 #endif //MICROJIT_DEF_H

@@ -10,9 +10,9 @@ _NO_DISCARD_ static _ALWAYS_INLINE_ size_t get_time_us(){
     return static_cast<size_t>(duration.count());
 }
 
-microjit::MicroJITCompiler::CompilationResult
-microjit::CompilationHandler::compile(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    return compiler->compile(p_func);
+void
+microjit::CompilationHandler::compile(Ref<RectifiedFunction> p_func, microjit::MicroJITCompiler::CompilationResult* p_ret) {
+    *p_ret = compiler->compile(p_func);
 }
 
 
@@ -22,16 +22,17 @@ bool microjit::SingleUnsafeCompilationHandler::function_compiled(const microjit:
 
 microjit::CompilationHandler::VirtualStackFunction
 microjit::SingleUnsafeCompilationHandler::get_or_create(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    try {
-        return function_map.at((size_t)p_func->host);
-    } catch (const std::out_of_range&){
-        return recompile(p_func);
-    }
+    auto host_addr = (size_t)p_func->host;
+    if (function_map.find(host_addr) == function_map.end())  return recompile(p_func);
+    return function_map.at(host_addr);
 }
 
 microjit::CompilationHandler::VirtualStackFunction
 microjit::SingleUnsafeCompilationHandler::recompile(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    auto result = compile(p_func);
+    auto func_ptr = (size_t)p_func.ptr();
+    MicroJITCompiler::CompilationResult result{};
+    auto result_ptr = &result;
+    compile(p_func, result_ptr);
     if (result.error) return nullptr;
     auto ret = (VirtualStackFunction)result.assembly->callback;
     function_map[(size_t)p_func->host] = ret;
@@ -78,16 +79,16 @@ bool microjit::CommandQueueCompilationHandler::function_compiled_internal(
 
 microjit::CompilationHandler::VirtualStackFunction microjit::CommandQueueCompilationHandler::get_or_create_internal(
         const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    try {
-        return function_map.at((size_t)p_func->host);
-    } catch (const std::out_of_range&){
-        return compile_from_scratch(p_func);
-    }
+    auto host_addr = (size_t)p_func->host;
+    if (function_map.find(host_addr) == function_map.end())  return recompile(p_func);
+    return function_map.at(host_addr);
 }
 
 microjit::CompilationHandler::VirtualStackFunction
 microjit::CommandQueueCompilationHandler::recompile_internal(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
-    auto result = compile(p_func);
+    MicroJITCompiler::CompilationResult result{};
+    auto result_ptr = &result;
+    compile(p_func, result_ptr);
     if (result.error) return nullptr;
     auto ret = (VirtualStackFunction)result.assembly->callback;
     function_map[(size_t) p_func->host] = ret;
@@ -183,20 +184,19 @@ microjit::CompilationHandler::VirtualStackFunction microjit::ThreadPoolCompilati
     // If available but is null, another thread is compiling this function, wait for it
     // If not available, create a placeholder entry and wait for the function to be compiled
     // Inside the try block, the lock must be write-locked
-    try {
-        VirtualStackFunction re;
-        while (true) {
-            lock.write_lock();
-            re = function_map.at((size_t)p_func->host);
-            lock.write_unlock();
-            if (re) return re;
-            std::this_thread::yield();
-        }
-    } catch (const std::out_of_range&){
-        function_map[(size_t) p_func->host] = nullptr;
+    auto host_addr = (size_t)p_func->host;
+    VirtualStackFunction re;
+    while (true) {
+        lock.write_lock();
+        if (function_map.find(host_addr) == function_map.end()) break;
+        re = function_map.at(host_addr);
         lock.write_unlock();
-        return compile_from_scratch(p_func);
+        if (re) return re;
+        std::this_thread::yield();
     }
+    function_map[(size_t) p_func->host] = nullptr;
+    lock.write_unlock();
+    return compile_from_scratch(p_func);
 }
 
 static thread_local microjit::Ref<microjit::MicroJITCompiler> thread_specific_compiler = microjit::Ref<microjit::MicroJITCompiler>::null();

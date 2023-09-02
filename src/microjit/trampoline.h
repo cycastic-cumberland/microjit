@@ -7,7 +7,6 @@
 
 #include <functional>
 #include "helper.h"
-#include "virtual_stack.h"
 #include "type.h"
 
 namespace microjit {
@@ -70,14 +69,19 @@ namespace microjit {
         static void create_args(std::vector<Type>* p_vec) {
             p_vec->push_back(Type::create<T>());
         }
+    protected:
+        void (*caller)(const BaseTrampoline*, uint8_t*) = nullptr;
     public:
-        virtual void call(VirtualStack* p_stack) const = 0;
+        _NO_DISCARD_ _ALWAYS_INLINE_ decltype(caller) get_caller() const { return caller; }
+        void call(uint8_t* p_stack) const {
+            caller(this, p_stack);
+        }
 
         template <typename R, typename...Args>
         static Ref<NativeFunctionTrampoline<R, Args...>> create_native_trampoline(R (*f)(Args...));
         template<class T>
         static Ref<JitFunctionTrampoline> create_jit_trampoline(const T* p_host, void (*p_recompile_cb)(const T*),
-                                                 void (**p_actual_trampoline)(VirtualStack*));
+                                                 void (**p_actual_trampoline)(uint8_t *));
     };
 
     template <typename R, typename...Args>
@@ -91,19 +95,19 @@ namespace microjit {
         static constexpr auto args_combined_size = (sizeof(Args) + ...);
         const Type return_type;
         const std::vector<Type> argument_types;
-        NativeFunctionTrampoline(FunctorType f, Type p_ret_type, std::vector<Type>& p_arg_types)
-                : functor(f), return_type(p_ret_type), argument_types(std::move(p_arg_types)) {}
     private:
         template<typename T>
         static void create_args(std::vector<Type>* p_vec){
             p_vec->push_back(Type::create<T>());
         }
+// Passed from left to right
 #if defined(__clang__)
         template<typename T>
-        T pass_arg(VirtualStack* p_stack, VirtualStack::StackPtr *vrsp_ptr, int *argc,
-                   VirtualStack::StackPtr old_rsp) const {
-            *vrsp_ptr = (VirtualStack::StackPtr)((size_t)*vrsp_ptr - sizeof(T));
-            auto arg_ptr = (T*)(*vrsp_ptr);
+        T pass_arg(uint8_t **vrsp_ptr, int *argc,
+                   uint8_t *old_rsp) const {
+            auto new_offset = (size_t)*vrsp_ptr - sizeof(T);
+            *vrsp_ptr = (uint8_t*)(new_offset);
+            auto arg_ptr = (T*)(new_offset);
             if (*argc == argument_types.size() - 1){
                 *vrsp_ptr = old_rsp;
             } else {
@@ -112,242 +116,119 @@ namespace microjit {
             return *arg_ptr;
         }
         template<typename ...Args2>
-        void call_internal(void (*f)(Args2...), VirtualStack* p_stack) const {
-            auto** vrsp_ptr = p_stack->rsp();
-            auto** vrbp_ptr = p_stack->rbp();
-            auto old_rsp = *vrsp_ptr;
-            auto old_rbp = *vrbp_ptr;
+        void call_internal(void (*f)(Args2...), uint8_t* p_stack) const {
+            constexpr auto args_space_size = calculate_args_space<R, Args...>();
+            auto floor = p_stack;
+            auto ceil = (uint8_t*)((size_t)p_stack + args_space_size);
 
-            *vrbp_ptr = old_rsp;
             if constexpr (sizeof...(Args2) == 0) {
                 f();
             } else {
                 int i = 0;
-                *vrsp_ptr = (VirtualStack::StackPtr)((size_t)old_rsp + args_combined_size);
-                f(pass_arg<Args2>(p_stack, vrsp_ptr, &i, old_rsp)...);
+                f(pass_arg<Args2>(&ceil, &i, floor)...);
             }
-
-            *vrsp_ptr = old_rsp;
-            *vrbp_ptr = old_rbp;
         }
 
         template<typename R2, typename ...Args2>
-        void call_internal(R2 (*f)(Args2...), VirtualStack* p_stack) const {
-            auto** vrsp_ptr = p_stack->rsp();
-            auto** vrbp_ptr = p_stack->rbp();
-            auto old_rsp = *vrsp_ptr;
-            auto old_rbp = *vrbp_ptr;
+        void call_internal(R2 (*f)(Args2...), uint8_t* p_stack) const {
+            constexpr auto args_space_size = calculate_args_space<R, Args...>();
+            auto floor = p_stack;
+            auto ceil = (uint8_t*)((size_t)p_stack + args_space_size);
 
-            *vrbp_ptr = old_rsp;
             if constexpr (sizeof...(Args2) == 0) {
                 f();
             } else {
                 int i = 0;
-                *vrsp_ptr = (VirtualStack::StackPtr)((size_t)old_rsp + args_combined_size);
-                R2 re = f(pass_arg<Args2>(p_stack, vrsp_ptr, &i, old_rsp)...);
+                R2 re = f(pass_arg<Args2>(&ceil, &i, floor)...);
                 if constexpr (std::is_fundamental_v<R2>) {
-                    *(R2*)old_rsp = re;
+                    *(R2*)floor = re;
                 } else {
                     auto cc = (void(*)(void*, const void*))return_type.copy_constructor;
-                    cc(old_rsp, &re);
+                    cc(floor, &re);
                 }
             }
-
-            *vrsp_ptr = old_rsp;
-            *vrbp_ptr = old_rbp;
         }
+// Passed from right to left
 #else
         template<typename T>
-        T pass_arg(VirtualStack* p_stack, VirtualStack::StackPtr *vrsp_ptr, int *argc,
-                   VirtualStack::StackPtr old_rsp) const {
+        T pass_arg(uint8_t **vrsp_ptr, int *argc,
+                   uint8_t *old_rsp) const {
             auto arg_ptr = (T*)(*vrsp_ptr);
             if (*argc == argument_types.size() - 1){
                 *vrsp_ptr = old_rsp;
             } else {
-                *vrsp_ptr = (VirtualStack::StackPtr)((size_t)*vrsp_ptr + sizeof(T));
+                *vrsp_ptr = (uint8_t*)((size_t)*vrsp_ptr + sizeof(T));
                 *argc += 1;
             }
             return *arg_ptr;
         }
         template<typename ...Args2>
-        void call_internal(void (*f)(Args2...), VirtualStack* p_stack) const {
-            auto** vrsp_ptr = p_stack->rsp();
-            auto** vrbp_ptr = p_stack->rbp();
-            auto old_rsp = *vrsp_ptr;
-            auto old_rbp = *vrbp_ptr;
+        void call_internal(void (*f)(Args2...), uint8_t* p_stack) const {
+            constexpr auto args_space_size = calculate_args_space<R, Args...>();
+            auto floor = p_stack;
+            auto ceil = (uint8_t*)((size_t)floor + (args_space_size - args_combined_size));
 
-            *vrbp_ptr = old_rsp;
             if constexpr (sizeof...(Args2) == 0) {
                 f();
             } else {
                 int i = 0;
-                f(pass_arg<Args>(p_stack, vrsp_ptr, &i, old_rsp)...);
+                f(pass_arg<Args2>(&ceil, &i, floor)...);
             }
-
-            *vrsp_ptr = old_rsp;
-            *vrbp_ptr = old_rbp;
         }
 
         template<typename R2, typename ...Args2>
-        void call_internal(R2 (*f)(Args2...), VirtualStack* p_stack) const {
-            auto** vrsp_ptr = p_stack->rsp();
-            auto** vrbp_ptr = p_stack->rbp();
-            auto old_rsp = *vrsp_ptr;
-            auto old_rbp = *vrbp_ptr;
+        void call_internal(R2 (*f)(Args2...), uint8_t* p_stack) const {
+            constexpr auto args_space_size = calculate_args_space<R, Args...>();
+            auto floor = p_stack;
+            auto ceil = (uint8_t*)((size_t)floor + (args_space_size - args_combined_size));
 
-            *vrbp_ptr = old_rsp;
-            if (argument_types.empty()) {
+            if constexpr (!sizeof...(Args2)) {
                 f(pass_arg<Args>(p_stack, nullptr, 0, nullptr)...);
             } else {
                 int i = 0;
-                R2 re = f(pass_arg<Args>(p_stack, vrsp_ptr, &i, old_rsp)...);
+                R2 re = f(pass_arg<Args2>(&ceil, &i, floor)...);
                 if constexpr (std::is_fundamental_v<R2>) {
-                    *(R2*)old_rsp = re;
+                    *(R2*)floor = re;
                 } else {
                     auto cc = (void(*)(void*, const void*))return_type.copy_constructor;
-                    cc(old_rsp, &re);
+                    cc(floor, &re);
                 }
             }
-
-            *vrsp_ptr = old_rsp;
-            *vrbp_ptr = old_rbp;
         }
 #endif
     public:
         _NO_DISCARD_ _ALWAYS_INLINE_ FunctorType get_functor() const {
             return functor;
         }
-        void call(VirtualStack* p_stack) const override {
-            call_internal(functor, p_stack);
+        static void call_final(const NativeFunctionTrampoline* p_self, uint8_t* p_stack) {
+            p_self->call_internal(p_self->functor, p_stack);
+        }
+    private:
+        NativeFunctionTrampoline(FunctorType f, Type p_ret_type, std::vector<Type>& p_arg_types)
+                : functor(f), return_type(p_ret_type), argument_types(std::move(p_arg_types)) {
+            caller = (decltype(caller))(call_final);
         }
     };
 
     class JitFunctionTrampoline : public BaseTrampoline {
     private:
-        void (**actual_trampoline)(VirtualStack*);
+        void (**actual_trampoline)(uint8_t *);
         void (*recompile_cb)(const void*);
         const void* host;
         friend class BaseTrampoline;
-
-        JitFunctionTrampoline(const void* p_host, void (*p_recompile_cb)(const void*),
-                              void (**p_actual_trampoline)(VirtualStack*))
-                : host(p_host), recompile_cb(p_recompile_cb),
-                  actual_trampoline(p_actual_trampoline){}
     public:
-        void call_final(VirtualStack* p_stack) const {
-            auto** vrsp_ptr = p_stack->rsp();
-            auto** vrbp_ptr = p_stack->rbp();
-            auto old_rsp = *vrsp_ptr;
-            auto old_rbp = *vrbp_ptr;
-            *vrbp_ptr = old_rsp;
-            recompile_cb(host);
-            (*actual_trampoline)(p_stack);
-            *vrsp_ptr = old_rsp;
-            *vrbp_ptr = old_rbp;
+        static void call_final(const JitFunctionTrampoline* p_self, uint8_t* p_stack) {
+            p_self->recompile_cb(p_self->host);
+            (*(p_self->actual_trampoline))(p_stack);
         }
-        void call(VirtualStack* p_stack) const override {
-            call_final(p_stack);
+    private:
+        JitFunctionTrampoline(const void* p_host, void (*p_recompile_cb)(const void*),
+                              void (**p_actual_trampoline)(uint8_t*))
+                : host(p_host), recompile_cb(p_recompile_cb),
+                  actual_trampoline(p_actual_trampoline){
+            caller = (decltype(caller))(call_final);
         }
     };
-
-    // template<typename R, typename ...Args>
-    // class InstanceTrampoline : public BaseTrampoline {
-    // private:
-    //     void (**actual_trampoline)(VirtualStack*);
-    //     void (*recompile_cb)(const void*);
-    //     const void* host;
-    //     friend class BaseTrampoline;
-
-    //     InstanceTrampoline(const void* p_host, void (*p_recompile_cb)(const void*),
-    //                           void (**p_actual_trampoline)(VirtualStack*))
-    //             : host(p_host), recompile_cb(p_recompile_cb),
-    //               actual_trampoline(p_actual_trampoline){}
-
-    //     template<typename T>
-    //     static _ALWAYS_INLINE_ void move_argument(const T &p_arg, VirtualStack *p_stack){
-    //         static constexpr bool trivially_copy_constructable = std::is_trivially_copy_constructible_v<T>;
-    //         auto stack_ptr = p_stack->rsp();
-    //         *stack_ptr = (VirtualStack::StackPtr)((size_t)(*stack_ptr) - sizeof(T));
-    //         if constexpr (trivially_copy_constructable){
-    //             *(T*)(*stack_ptr) = p_arg;
-    //         } else
-    //             new (*stack_ptr) T(p_arg);
-    //     }
-    //     template<typename T>
-    //     static _ALWAYS_INLINE_ void destruct_argument(const T &, VirtualStack *p_stack){
-    //         static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
-    //         auto stack_ptr = p_stack->rsp();
-    //         auto ptr = *stack_ptr;
-    //         if constexpr (!trivially_destructible)
-    //             ((T*)ptr)->~T();
-    //         *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
-    //     }
-
-    //     template<typename T>
-    //     static _ALWAYS_INLINE_ void destruct_return(VirtualStack *p_stack){
-    //         static constexpr bool trivially_destructible = std::is_trivially_destructible_v<T>;
-    //         auto stack_ptr = p_stack->rsp();
-    //         auto ptr = *stack_ptr;
-    //         if constexpr (!trivially_destructible)
-    //             ((T*)ptr)->~T();
-    //         *stack_ptr = (VirtualStack::StackPtr)((size_t)ptr + sizeof(T));
-    //     }
-
-    //     template<typename ...Args2>
-    //     static void call_internal(const InstanceTrampoline<void, Args2...>* p_self, VirtualStack* p_stack, Args2&&... args);
-    //     template<typename R2, typename ...Args2>
-    //     static R2 call_internal(const InstanceTrampoline<R2, Args2...>* p_self, VirtualStack* p_stack, Args2&&... args);
-    // public:
-    //     R call_final(VirtualStack* p_stack, Args&&... args) const {
-    //         return call_internal(this, std::forward<Args>(args)...);
-    //     }
-    //     void call(VirtualStack* p_stack) const override {  }
-    // };
-
-    // template<typename R, typename... Args>
-    // template<typename... Args2>
-    // void InstanceTrampoline<R, Args...>::call_internal(const InstanceTrampoline<void, Args2...> *p_self,
-    //                                                    VirtualStack* p_stack, Args2&&... args) {
-    //     auto self = ((InstanceTrampoline<R, Args...>*)p_self);
-    //     self->recompile_cb(self->host);
-    //     auto old_rbp = *p_stack->rbp();
-    //     auto old_rsp = *p_stack->rsp();
-    //     (move_argument<Args2>(args, p_stack), ...);
-    //     auto args_end = *p_stack->rsp();
-    //     *p_stack->rbp() = *p_stack->rsp();
-    //     (*self->actual_trampoline)(p_stack);
-    //     if (sizeof...(Args)){
-    //         *p_stack->rsp() = args_end;
-    //         (destruct_argument<Args2>(args, p_stack), ...);
-    //     }
-    //     *p_stack->rbp() = old_rbp;
-    //     *p_stack->rsp() = old_rsp;
-    // }
-
-    // template<typename R, typename... Args>
-    // template<typename R2, typename... Args2>
-    // R2 InstanceTrampoline<R, Args...>::call_internal(const InstanceTrampoline<R2, Args2...> *p_self,
-    //                                                    VirtualStack* p_stack, Args2&&... args) {
-    //     auto self = ((InstanceTrampoline<R, Args...>*)p_self);
-    //     self->recompile_cb(self->host);
-    //     auto old_rbp = *p_stack->rbp();
-    //     auto old_rsp = *p_stack->rsp();
-    //     (move_argument<Args2>(args, p_stack), ...);
-    //     const auto return_slot = (VirtualStack::StackPtr)((size_t)*p_stack->rsp() - sizeof(R2));
-    //     (*p_stack->rbp()) = return_slot;
-    //     (*p_stack->rsp()) = return_slot;
-    //     (*self->actual_trampoline)(p_stack);
-    //     auto re = *(R2*)return_slot;
-    //     // After copying the return value, destroy its stack entry
-    //     destruct_return<R2>(p_stack);
-    //     if (sizeof...(Args)){
-    //         (destruct_argument<Args2>(args, p_stack), ...);
-    //     }
-    //     *p_stack->rbp() = old_rbp;
-    //     *p_stack->rsp() = old_rsp;
-    //     return re;
-    // }
-
     template<typename R, typename... Args>
     Ref<NativeFunctionTrampoline<R, Args...>> BaseTrampoline::create_native_trampoline(R (*f)(Args...)) {
         std::vector<Type> arg_types{};
@@ -360,22 +241,12 @@ namespace microjit {
 
     template<class T>
     Ref<JitFunctionTrampoline> BaseTrampoline::create_jit_trampoline(const T *p_host, void (*p_recompile_cb)(const T *),
-                                                                     void (**p_actual_trampoline)(VirtualStack *)) {
+                                                                     void (**p_actual_trampoline)(uint8_t *)) {
         auto trampoline = new JitFunctionTrampoline((const void*)p_host,
                                                     (void (*)(const void*))p_recompile_cb,
                                                     p_actual_trampoline);
         return Ref<JitFunctionTrampoline>::from_uninitialized_object(trampoline);
     }
-
-    // template<class T, typename R, typename... Args>
-    // Ref<InstanceTrampoline<R, Args...>>
-    // BaseTrampoline::create_orchestrator_instance_trampoline(const T *p_host, void (*p_recompile_cb)(const T *),
-    //                                                         void (**p_actual_trampoline)(VirtualStack *)) {
-    //     auto trampoline = new InstanceTrampoline<R, Args...>((const void*)p_host,
-    //                                                          (void (*)(const void*))p_recompile_cb,
-    //                                                          p_actual_trampoline);
-    //     return Ref<InstanceTrampoline<R, Args...>>::from_uninitialized_object(trampoline);
-    // }
 }
 
 #endif //MICROJIT_EXPERIMENT_TRAMPOLINE_H

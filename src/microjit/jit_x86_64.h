@@ -114,8 +114,8 @@ namespace microjit {
                                                                    const Ref<BranchInstruction> &p_instruction,
                                                                    const Ref<BranchInfo>& p_branch_info,
                                                                    const Ref<PrimitiveBinaryOperation> &p_primitive_binary);
-        static void jit_trampoline_caller(JitFunctionTrampoline* p_trampoline, VirtualStack *p_stack);
-        static void native_trampoline_caller(BaseTrampoline* p_trampoline, VirtualStack *p_stack);
+//        static void jit_trampoline_caller(JitFunctionTrampoline* p_trampoline, VirtualStack *p_stack);
+//        static void native_trampoline_caller(BaseTrampoline* p_trampoline, VirtualStack *p_stack);
         static void invoke_function(Box<asmjit::x86::Assembler> &assembler,
                                     const Ref<StackFrameInfo>& p_frame_report,
                                     const Ref<RectifiedFunction>& p_func,

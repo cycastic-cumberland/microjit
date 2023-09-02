@@ -18,7 +18,6 @@
 #include "type.h"
 #include "trampoline.h"
 #include "helper.h"
-#include "virtual_stack.h"
 #include "utils.h"
 #include "primitive_conversion_map.gen.h"
 

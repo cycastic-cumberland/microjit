@@ -90,12 +90,12 @@ namespace microjit {
             TYPE_CONSTEXPR T (*f)() = nullptr;
             return create_internal(f);
         }
-        static bool is_floating_point(Type p_type) {
+        static _ALWAYS_INLINE_ bool is_floating_point(Type p_type) {
             TYPE_CONSTEXPR auto float_type = Type::create<float>();
             TYPE_CONSTEXPR auto double_type = Type::create<double>();
             return (p_type == float_type || p_type == double_type);
         }
-        static bool is_signed_integer(Type p_type) {
+        static _ALWAYS_INLINE_ bool is_signed_integer(Type p_type) {
             TYPE_CONSTEXPR auto i8 = Type::create<int8_t>();
             TYPE_CONSTEXPR auto i16 = Type::create<int16_t>();
             TYPE_CONSTEXPR auto i32 = Type::create<int32_t>();

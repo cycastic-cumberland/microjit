@@ -8,7 +8,7 @@
 #define MAX(m_a, m_b) ((m_a) > (m_b) ? (m_a) : (m_b))
 
 microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo>
-microjit::MicroJITCompiler::create_frame_report(const microjit::Ref<microjit::RectifiedFunction> &p_func) {
+microjit::MicroJITCompiler::create_frame_report(microjit::Ref<microjit::RectifiedFunction>p_func) {
     auto report = new StackFrameInfo();
     struct ScopeReport {
         Ref<RectifiedScope> scope;
@@ -16,8 +16,21 @@ microjit::MicroJITCompiler::create_frame_report(const microjit::Ref<microjit::Re
         size_t current_object_count;
         size_t iterating;
     };
+    // Note: this is just a temporary solution, I might rework this later
+    size_t args_combined_size = p_func->return_type.size;
+    for (auto arg : p_func->arguments->argument_types()){
+        args_combined_size += arg.size;
+    }
+    args_combined_size = simple_16_bit_align(args_combined_size);
+    uint32_t i = 0;
+    for (auto arg : p_func->arguments->argument_types()){
+        args_combined_size -= arg.size;
+        report->args_map[i] = args_combined_size;
+        i++;
+    }
+
     std::stack<ScopeReport> stack{};
-    stack.push(ScopeReport{p_func->main_scope, sizeof(void*) * 3, 0, 0});
+    stack.push(ScopeReport{p_func->main_scope, stack_reserve, 0, 0});
     while (!stack.empty()){
         auto current = stack.top();
         stack.pop();
@@ -28,7 +41,11 @@ microjit::MicroJITCompiler::create_frame_report(const microjit::Ref<microjit::Re
             switch (ins->get_instruction_type()) {
                 case Instruction::IT_DECLARE_VARIABLE: {
                     auto as_var = ins.c_style_cast<VariableInstruction>();
-                    current.current_size += as_var->type.size;
+                    size_t aligned_size = as_var->type.size;
+                    if (aligned_size >= 16){
+                        aligned_size += simple_16_bit_align(current.current_size + aligned_size) - current.current_size;
+                    }
+                    current.current_size += aligned_size;
                     current.current_object_count++;
                     report->max_frame_size = MAX(report->max_frame_size, current.current_size);
                     report->max_object_allocation = MAX(report->max_object_allocation, current.current_object_count);
@@ -59,5 +76,6 @@ microjit::MicroJITCompiler::create_frame_report(const microjit::Ref<microjit::Re
             if (break_loop) break;
         }
     }
+    report->max_frame_size = simple_16_bit_align(report->max_frame_size);
     return microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo>::from_uninitialized_object(report);
 }

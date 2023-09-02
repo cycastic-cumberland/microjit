@@ -5,7 +5,6 @@
 
 #include <queue>
 #include "jit_x86_64.h"
-#include "virtual_stack.h"
 
 
 static constexpr auto rbp = asmjit::x86::rbp;
@@ -20,16 +19,18 @@ static constexpr auto rdx = asmjit::x86::rdx;
 static constexpr auto xmm0 = asmjit::x86::xmm0;
 static constexpr auto xmm1 = asmjit::x86::xmm1;
 
-static constexpr auto ptrs = int64_t(sizeof(microjit::VirtualStack::StackPtr));
+static constexpr auto ptrs = int64_t(sizeof(void*));
 
-#define VSTACK_LOC asmjit::x86::qword_ptr(rbp, -ptrs)
-#define LOAD_VRBP_LOC (-(ptrs * 2))
-#define LOAD_VRBP asmjit::x86::qword_ptr(rbp, LOAD_VRBP_LOC)
+#define LOAD_ARGS_SPACE asmjit::x86::qword_ptr(rbp, -ptrs)
 
-#define VSTACK_SETUP()                                      \
-    AIN(assembler->call(virtual_stack_get_rbp));            \
-    AIN(assembler->mov(rbx, asmjit::x86::qword_ptr(rax)));  \
-    AIN(assembler->mov(LOAD_VRBP, rbx));
+//#define VSTACK_LOC asmjit::x86::qword_ptr(rbp, -ptrs)
+//#define LOAD_VRBP_LOC (-(ptrs * 2))
+//#define LOAD_VRBP asmjit::x86::qword_ptr(rbp, LOAD_VRBP_LOC)
+//
+//#define VSTACK_SETUP()                                      \
+//    AIN(assembler->call(virtual_stack_get_rbp));            \
+//    AIN(assembler->mov(rbx, asmjit::x86::qword_ptr(rax)));  \
+//    AIN(assembler->mov(LOAD_VRBP, rbx));
 
 #define VAR_COPY(m_size, m_primitive, m_copy)                                                    \
     if (!(m_primitive)){                                                                            \
@@ -102,28 +103,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     AIN(assembler->mov(rbp, rsp));
     AIN(assembler->sub(rsp, frame_report->max_frame_size));
 
-    AINL("Setting up virtual stack");
-    // Move the VirtualStack pointer from the first argument (rdi)
-    // to the first slot of the stack
-    AIN(assembler->mov(VSTACK_LOC, rdi));
-    VSTACK_SETUP();
-#ifdef RUN_STACK_OVERFLOW_CHECK
-    AINL("Stack overflow test");
-    // Invoke VirtualStack::capacity
-    AIN(assembler->call(virtual_stack_get_capacity));
-    // rbx = capacity
-    AIN(assembler->mov(rbx, rax));
-    // Invoke VirtualStack::allocated
-    AIN(assembler->call(virtual_stack_get_allocated));
-    // rax = allocated; rbx = capacity
-
-    auto so_test_success = assembler->newLabel();
-    AIN(assembler->cmp(rax, rbx));
-    AIN(assembler->jle(so_test_success)); // Jump to 'so_test_success' if allocated <= capacity
-    // Call 'raise_stack_overflow' if did not jump
-    AIN(assembler->call(MicroJITCompiler::raise_stack_overflown));
-    AIN(assembler->bind(so_test_success));
-#endif
+    AIN(assembler->mov(LOAD_ARGS_SPACE, rdi));
 
     const auto& function_arguments = p_func->arguments;
     auto branches_report = create_branches_report(assembler, p_func);
@@ -171,8 +151,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                         }
                         case Value::VAL_ARGUMENT: {
                             auto as_arg = as_cc->value_reference.c_style_cast<ArgumentValue>();
-                            auto arg_offset = function_arguments->argument_offsets()[as_arg->argument_index];
-                            arg_offset += p_func->return_type.size;
+                            auto arg_offset = frame_report->args_map[as_arg->argument_index];
                             copy_construct_variable_internal(assembler, type, as_cc->ctor,
                                                              { RelativeObject::STACK_BASE_PTR, stack_offset },
                                                              { RelativeObject::VIRTUAL_STACK_BASE_PTR, static_cast<int64_t>(arg_offset) });
@@ -207,8 +186,7 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                         }
                         case Value::VAL_ARGUMENT: {
                             auto as_arg = as_assign->value_reference.c_style_cast<ArgumentValue>();
-                            auto arg_offset = function_arguments->argument_offsets()[as_arg->argument_index];
-                            arg_offset += p_func->return_type.size;
+                            auto arg_offset = frame_report->args_map[as_arg->argument_index];
                             copy_construct_variable_internal(assembler, type, as_assign->ctor,
                                                              { RelativeObject::STACK_BASE_PTR, stack_offset },
                                                              { RelativeObject::VIRTUAL_STACK_BASE_PTR, static_cast<int64_t>(arg_offset) });
@@ -235,11 +213,11 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                     // is void
                     if (p_func->return_type.size > 0) {
                         const auto& return_variable = as_return->return_var;
-                        const auto type = return_variable->type;
+                        auto type = return_variable->type;
                         auto stack_offset = offset_map.at(return_variable);
-                        AIN(assembler->mov(rbx, LOAD_VRBP));
+                        AIN(assembler->mov(rbx, LOAD_ARGS_SPACE));
                         AIN(assembler->lea(rcx, asmjit::x86::qword_ptr(rbp, stack_offset)));
-                        VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
+                        VAR_COPY(type.size, type.is_primitive, type.copy_constructor)
                     }
 
                     AINL("Destructing all stack items");
@@ -280,12 +258,6 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
                 }
                 case Instruction::IT_PRIMITIVE_CONVERT: {
                     MJ_RAISE("Primitive conversion is currently unsupported");
-//                    auto as_convert = current_instruction.c_style_cast<PrimitiveConvertInstruction>();
-//                    auto from_offset = offset_map.at(as_convert->from_var);
-//                    auto to_offset = offset_map.at(as_convert->to_var);
-//                    auto converter_cb = converter.get_handler(as_convert->converter);
-//                    converter_cb(assembler, LOAD_VRBP_LOC, from_offset, to_offset);
-//                    break;
                 }
                 case Instruction::IT_INVOKE: {
                     auto as_invocation = current_instruction.c_style_cast<InvocationInstruction>();
@@ -401,15 +373,16 @@ microjit::MicroJITCompiler_x86_64::compile_internal(const microjit::Ref<microjit
     }
 
     AINL("Epilogue");
-    assembler->bind(exit_label);
+    AIN(assembler->bind(exit_label));
     AIN(assembler->leave());
     AIN(assembler->ret());
 
+    unsigned int err_code;
     {
         std::lock_guard<std::mutex> guard(runtime->get_mutex());
-        runtime->get_asmjit_runtime().add(&assembly->callback, &assembly->code);
+        err_code = runtime->get_asmjit_runtime().add(&assembly->callback, &assembly->code);
     }
-    return { 0, assembly };
+    return { err_code, assembly };
 }
 void microjit::MicroJITCompiler_x86_64::copy_construct_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                                          const Type& p_type,
@@ -418,7 +391,7 @@ void microjit::MicroJITCompiler_x86_64::copy_construct_variable_internal(microji
                                                                          RelativeObject p_copy_target) {
     if (p_receive_target.unit == RelativeObject::VIRTUAL_STACK_BASE_PTR ||
         p_copy_target.unit == RelativeObject::VIRTUAL_STACK_BASE_PTR) {
-        AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
+        AIN(assembler->mov(asmjit::x86::r10, LOAD_ARGS_SPACE));
     }
     if (p_receive_target.unit == RelativeObject::STACK_BASE_PTR) {
         AIN(assembler->lea(rbx, asmjit::x86::qword_ptr(rbp, p_receive_target.offset)));
@@ -439,22 +412,8 @@ void microjit::MicroJITCompiler_x86_64::copy_construct_variable_internal(microji
         else
             AIN(assembler->add(rcx, p_copy_target.offset));
     }
-    VAR_COPY(p_type.size, p_type.is_primitive, p_copy_constructor);
+    VAR_COPY(p_type.size, p_type.is_primitive, p_copy_constructor)
 }
-
-//void microjit::MicroJITCompiler_x86_64::assign_variable_internal(microjit::Box<asmjit::x86::Assembler> &assembler,
-//                                                                 const microjit::Type &p_type, const void *p_operator,
-//                                                                 const int64_t &p_offset, const int64_t &p_copy_target) {
-//    AIN(assembler->mov(rbx, LOAD_VRBP));
-//    AIN(assembler->mov(rcx, rbx));
-//    AIN(assembler->sub(rbx, std::abs(p_offset)));
-//    if (p_copy_target >= 0) {
-//        AIN(assembler->add(rcx, p_copy_target));
-//    } else {
-//        AIN(assembler->sub(rcx, std::abs(p_copy_target)));
-//    }
-//    VAR_COPY(p_type.size, p_type.is_primitive, p_operator);
-//}
 
 void microjit::MicroJITCompiler_x86_64::iterative_destructor_call(microjit::Box<asmjit::x86::Assembler> &assembler,
                                                                   const microjit::Ref<microjit::MicroJITCompiler::StackFrameInfo> &p_frame_info,
@@ -556,17 +515,6 @@ void microjit::MicroJITCompiler_x86_64::copy_immediate_internal(microjit::Box<as
     AIN(assembler->call(p_ctor));
     // Return the stack space
     AIN(assembler->add(asmjit::x86::rsp, type_data.size));
-}
-
-void microjit::MicroJITCompiler_x86_64::jit_trampoline_caller(JitFunctionTrampoline* p_trampoline,
-                                                              VirtualStack *p_stack) {
-    auto cb = &microjit::JitFunctionTrampoline::call_final;
-    (p_trampoline->*cb)(p_stack);
-}
-
-void microjit::MicroJITCompiler_x86_64::native_trampoline_caller(microjit::BaseTrampoline *p_trampoline,
-                                                                 microjit::VirtualStack *p_stack) {
-    p_trampoline->call(p_stack);
 }
 
 void microjit::MicroJITCompiler_x86_64::assign_atomic_expression(Box<asmjit::x86::Assembler> &assembler,
@@ -1136,19 +1084,21 @@ void microjit::MicroJITCompiler_x86_64::branch_eval_primitive_binary_atomic_expr
     auto right_operand = p_primitive_binary->right_operand;
     Box<Type> operand_type_boxed{};
     bool is_operand_floating_point{};
+    TYPE_CONSTEXPR auto fp32 = Type::create<float>();
+    TYPE_CONSTEXPR auto fp64 = Type::create<double>();
     switch (left_operand->get_value_type()) {
         case Value::VAL_IMMEDIATE: {
             auto as_imm = left_operand.c_style_cast<ImmediateValue>();
-            auto type = as_imm->imm_type;
-            is_operand_floating_point = Type::is_floating_point(type);
-            operand_type_boxed = Box<Type>::make_box(type);
+//            auto type = as_imm->imm_type;
+            is_operand_floating_point = as_imm->imm_type == fp32 || as_imm->imm_type == fp64;
+            operand_type_boxed = Box<Type>::make_box(as_imm->imm_type);
             break;
         }
         case Value::VAL_VARIABLE: {
             auto as_var = left_operand.c_style_cast<VariableValue>();
-            auto type = as_var->variable->type;
-            is_operand_floating_point = Type::is_floating_point(type);
-            operand_type_boxed = Box<Type>::make_box(type);
+//            auto type = as_var->variable->type;
+            is_operand_floating_point = as_var->variable->type == fp32 || as_var->variable->type == fp64;
+            operand_type_boxed = Box<Type>::make_box(as_var->variable->type);
             break;
         }
         case Value::VAL_ARGUMENT:
@@ -1192,17 +1142,11 @@ void microjit::MicroJITCompiler_x86_64::invoke_function(microjit::Box<asmjit::x8
     const auto target_trampoline = p_instruction->target_trampoline;
     const auto target_return_type = p_instruction->target_return_type;
     auto function_arguments = p_func->arguments;
-    // Call's prologue
-    // r11 now hold old vrbp
-    AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
-    AIN(assembler->mov(rdi, VSTACK_LOC));
-    AIN(assembler->mov(rsi, target_return_type.size + p_instruction->arguments_total_size));
-    AIN(assembler->call(virtual_stack_create_stack_frame));
-    // Cache the new stack pointers
-    AIN(assembler->mov(rdi, VSTACK_LOC));
-    VSTACK_SETUP()
-    // r10 now hold new vrbp
-    AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
+
+    // r10 now hold the end of new args_space
+    AIN(assembler->mov(asmjit::x86::r10, rsp));
+    auto aligned_args_space = simple_16_bit_align(target_return_type.size + p_instruction->arguments_total_size);
+    AIN(assembler->sub(rsp, aligned_args_space));
     for (const auto& arg : p_instruction->passed_arguments->values){
         switch (arg->get_value_type()) {
             case Value::VAL_IMMEDIATE: {
@@ -1223,7 +1167,6 @@ void microjit::MicroJITCompiler_x86_64::invoke_function(microjit::Box<asmjit::x8
                 arg_offset += p_func->return_type.size;
                 AIN(assembler->sub(asmjit::x86::r10, arg_size));
                 AIN(assembler->mov(rbx, asmjit::x86::r10));
-                // Load argument from Virtual stack
                 AIN(assembler->mov(rcx, asmjit::x86::r11));
                 AIN(assembler->add(rcx, arg_offset));
                 VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
@@ -1243,37 +1186,18 @@ void microjit::MicroJITCompiler_x86_64::invoke_function(microjit::Box<asmjit::x8
                 MJ_RAISE("Passing expression as argument is not supported. Evaluate them first.");
         }
     }
-    AIN(assembler->sub(asmjit::x86::r10, target_return_type.size));
+//    AIN(assembler->sub(asmjit::x86::r10, target_return_type.size));
     // The stack setup process is finished
     // Load trampoline to rdi
     AIN(assembler->mov(rdi, (size_t)(target_trampoline.ptr())));
-    // Load VirtualStack to rsi
-    AIN(assembler->mov(rsi, VSTACK_LOC));
+    // Load beginning of new args space to rsi
+    AIN(assembler->mov(rsi, rsp));
     // Call the trampoline
-    if (p_instruction->is_jit) {
-        // Note: I have to create a new stack frame again,
-        // or it would not work with clang
-        // I'm not going to add a macro here,
-        // creating a new frame does not hurt the performance that much anyway
-        AIN(assembler->push(rbp));
-        AIN(assembler->mov(rbp, rsp));
-        AIN(assembler->call(jit_trampoline_caller));
-        AIN(assembler->leave());
-    } else
-        AIN(assembler->call(native_trampoline_caller));
-    // Collapse the stack frame
-    // Call's epilogue
-    // Cleanup the arguments
-    //
-    // r10 now hold new vrbp
-    AIN(assembler->mov(asmjit::x86::r10, LOAD_VRBP));
-    AIN(assembler->mov(rdi, VSTACK_LOC));
-    AIN(assembler->call(virtual_stack_leave_stack_frame));
-    // Cache the collapsed stack pointers
-    AIN(assembler->mov(rdi, VSTACK_LOC));
-    VSTACK_SETUP()
-    // r11 now hold original vrbp
-    AIN(assembler->mov(asmjit::x86::r11, LOAD_VRBP));
+    AIN(assembler->call(target_trampoline->get_caller()));
+
+    AIN(assembler->mov(asmjit::x86::r11, rsp));
+    AIN(assembler->add(rsp, aligned_args_space));
+    AIN(assembler->mov(asmjit::x86::r10, rsp));
     for (const auto& arg : p_instruction->passed_arguments->values) {
         Box<Type> type{};
         switch (arg->get_value_type()) {
@@ -1305,24 +1229,22 @@ void microjit::MicroJITCompiler_x86_64::invoke_function(microjit::Box<asmjit::x8
     // The function collapse the stack frame before copying the return value
     // There's no stack push in-between so there should be no problem
     // If there is... you know where to look
-    const auto func_ret_type = target_return_type;
-    if (func_ret_type.size > 0) {
-        AIN(assembler->sub(asmjit::x86::r10, func_ret_type.size));
+    if (target_return_type.size > 0) {
         // Copy the return value (if needed)
         auto return_var = p_instruction->return_variable;
         if (return_var.is_valid()){
             auto ret_var_offset = p_frame_report->variable_map.at(return_var);
             // Load variable address to rbx
             AIN(assembler->lea(rbx, asmjit::x86::qword_ptr(rbp, ret_var_offset)));
-            AIN(assembler->mov(rcx, asmjit::x86::r10));
+            AIN(assembler->mov(rcx, asmjit::x86::r11));
             // Copy return value into variable
             auto type = return_var->type;
             VAR_COPY(type.size, type.is_primitive, type.copy_constructor);
         }
-        if (!func_ret_type.is_primitive) {
+        if (!target_return_type.is_primitive) {
             // Cleanup the return value (if there's any)
-            AIN(assembler->mov(rdi, asmjit::x86::r10));
-            AIN(assembler->call(func_ret_type.destructor));
+            AIN(assembler->mov(rdi, asmjit::x86::r11));
+            AIN(assembler->call(target_return_type.destructor));
         }
     }
 }
