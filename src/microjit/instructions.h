@@ -914,7 +914,7 @@ namespace microjit {
     private:
         RectifiedFunction(const void* p_host,
                           const Ref<ArgumentsDeclaration>& p_args,
-                          const Ref<JitFunctionTrampoline> p_trampoline,
+                          const Ref<JitFunctionTrampoline>& p_trampoline,
                           const Ref<RectifiedScope>& p_main_scope,
                           Type p_ret)
                           : host(p_host), arguments(p_args), trampoline(p_trampoline),

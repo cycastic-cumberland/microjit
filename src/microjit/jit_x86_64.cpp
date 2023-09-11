@@ -23,15 +23,6 @@ static constexpr auto ptrs = int64_t(sizeof(void*));
 
 #define LOAD_ARGS_SPACE asmjit::x86::qword_ptr(rbp, -ptrs)
 
-//#define VSTACK_LOC asmjit::x86::qword_ptr(rbp, -ptrs)
-//#define LOAD_VRBP_LOC (-(ptrs * 2))
-//#define LOAD_VRBP asmjit::x86::qword_ptr(rbp, LOAD_VRBP_LOC)
-//
-//#define VSTACK_SETUP()                                      \
-//    AIN(assembler->call(virtual_stack_get_rbp));            \
-//    AIN(assembler->mov(rbx, asmjit::x86::qword_ptr(rax)));  \
-//    AIN(assembler->mov(LOAD_VRBP, rbx));
-
 #define VAR_COPY(m_size, m_primitive, m_copy)                                                    \
     if (!(m_primitive)){                                                                            \
         AIN(assembler->mov(asmjit::x86::rdi, rbx));                                                 \
